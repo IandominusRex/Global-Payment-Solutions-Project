@@ -45,15 +45,40 @@ viable" is checked by tests.
 
 | # | Analysis | Required fields / tables | Planted pattern | Viability check |
 |---|---|---|---|---|
-| 1 | Money movement | `fact_payment.amount_sgd`, `sender_country`, `receiver_country`, `currency_code`, `dim_entity` | SG↔CN is the dominant corridor, EUR inflows | Top corridor ≥ 15% of value |
+| 1 | Money movement | `fact_payment.amount_sgd`, `sender_country`, `receiver_country`, `currency_code`, `dim_entity` | SG→CN is the dominant cross-border corridor, EUR inflows | SG→CN is the top cross-border corridor by value |
 | 2 | Cross-border | `fact_payment_event` hops, `settled_ts - initiated_ts`, status by corridor/rail | SG→VN slow, US→IN high failure | ≥ 200 payments on each flagged corridor. Its P90 / failure rate is at least 1.5× the median |
-| 3 | Efficiency | `is_stp`, `repair_count`, `missed_cutoff`, `channel`, timestamps | Sanctions holds and cut-off misses create a long tail. Legacy-file channel has lower STP | P90/P50 settle time ≥ 3. STP(LEGACY_FILE) < STP(API) |
+| 3 | Efficiency | `is_stp`, `repair_count`, `missed_cutoff`, `channel`, timestamps | Sanctions holds and cut-off misses create a long tail. Legacy-file channel has lower STP | Cross-border P90/P50 ≥ 3 and mean > 1.2× median. STP(LEGACY_FILE) < STP(API) by 5 pp |
 | 4 | Failures | `status`, `failure_reason` → `dim_failure_reason.category`, `counterparty_id` | About 3 reasons ≈ 80%. 8 repeat-offender suppliers | Top 3 reasons ≥ 70% of failures |
 | 5 | Forecast | `fact_balance`, `fact_invoice` (due dates), `dim_calendar` | Weekly and monthly seasonality, trend, late payers | ≥ 24 months of history. Weekly seasonality is detectable |
 | 6 | Concentration | `fact_balance`, `dim_account.is_pooled`, `overdraft_limit`, rates, `fact_sweep` | Idle INR cash while DE is overdrawn | At least one day has idle cash > overdraft in the same group |
 | 7 | FX exposure | Flows where `currency_code ≠ entity.functional_currency`, `fact_fx_rate`, `fact_fx_hedge` | Long EUR, short CNY, partially hedged | Net EUR > 0 and net CNY < 0 in SGD terms |
-| 8 | Reconciliation | `fact_statement_line`, `fact_invoice`, truth allocation | Virtual-account payers match better | VA match rate − free-text match rate ≥ 20 pp |
+| 8 | Reconciliation | `fact_statement_line`, `fact_invoice`, truth allocation | Virtual-account payers match better | Exact-reference rate, VA − free text ≥ 20 pp (v1 proxy; true match rate needs v4 statements) |
 | 9 | Anomalies | `fact_payment`, `dim_counterparty.first_seen_date`, truth labels | 8 labelled anomaly types | ≥ 100 labels per type across the backfill |
+
+## v1 verification results
+
+Measured on the full default backfill (seed 42, 24 months). `tests/test_analysis_contracts.py` enforces these, so they can't silently regress.
+
+| # | Check | Result |
+|---|---|---|
+| – | Volume | 834k payments (about 1,500 per business day plus about 8% annual growth), 576k invoices |
+| – | Integrity | 0 time-order violations, 0 foreign-key violations, and the same seed produces identical data |
+| 1 | Top cross-border corridor | SG→CN (7% of cross-border value). Domestic trade dominates overall, as in real groups. |
+| 2 | Slow corridor SG→VN | about 2,300 payments. P90 is well above the median corridor. |
+| 2 | Failure hotspot US→IN | 10.6% fail rate against a 2.0% median corridor |
+| 3 | Cross-border timing | P50 4.3h, P90 about 28h, 88% credited within 24h, close to published SWIFT gpi figures |
+| 3 | STP by channel | API 96.7%, LEGACY_FILE 86.5% |
+| 4 | Failure Pareto | AC01 + RR03 + AM04 ≈ 72% of failures. Overall failure rate 1.1%. |
+| 5 | Trend and seasonality | Tue/Thu payment-run peaks, quiet weekends, month-end spikes, Chinese New Year dip in CN |
+| 7 | FX exposure | net long EUR, net short CNY (non-functional-currency flows) |
+| 8 | Reference quality | virtual-account payers 100% exact references, free-text payers 56% |
+
+### What the checks caught while building v1
+
+- **A sorting bug** paired payment dates with the wrong invoices. Monthly value grew 9× over two years instead of about 8% a year. It was fixed and is now guarded by the trend check.
+- **57% of payments were cross-border**, because counterparties had no home-country bias. There is now a domestic preference, so cross-border is about 28%, which is realistic.
+- **Cross-border P50 was 16h.** Per-hop times were far slower than gpi reality. Hops now take minutes, and delay comes from time zones, cut-offs and holds.
+- **7% of invoices were marked written off**, because warm-up invoices were judged against payments that had already been filtered out. Only AR can now be written off, and payables stay owed.
 
 ## Volume sanity check
 

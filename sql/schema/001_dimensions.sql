@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS dim_entity (
     legal_type          TEXT NOT NULL,
     functional_currency TEXT NOT NULL REFERENCES dim_currency(currency_code),  -- [+]
     is_in_house_bank    BOOLEAN NOT NULL,                                      -- [+]
+    size                NUMERIC NOT NULL,                                      -- [+] relative volume weight
+    primary_channel     TEXT NOT NULL,                                         -- [+] API / H2H_FILE / PORTAL / LEGACY_FILE
     timezone            TEXT NOT NULL                                          -- [+]
 );
 

@@ -13,8 +13,8 @@ warehouse, nine treasury analyses, dashboards, and a bank-style FastAPI service.
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev,api]"
-treasury-sim build-world          # dimensions + calendar + FX -> data/warehouse/treasury.sqlite
-pytest
+treasury-sim backfill             # 24 months of history -> data/warehouse/treasury.sqlite (~1 min)
+pytest                            # add -m "not contract" to skip the ~30s full-size data checks
 ```
 
 ## Layout
@@ -30,7 +30,7 @@ pytest
 | `dashboards/` | 3 | BI files and screenshots |
 | `src/treasury/api/` | 4 | FastAPI: balances, payment status, KPIs, forecast, exceptions |
 | `docs/` | – | Architecture and the dataset design review |
-| `data/` | – | Generated output (git-ignored, reproducible from seed) |
+| `data/` | – | Generated output (git-ignored, reproducible from seed): `warehouse/`, `landing/` (monthly Parquet), `truth/` (hidden answers) |
 
 ## The nine analyses
 
@@ -45,7 +45,7 @@ guarantees each analysis has something to find.
 
 - [x] Repo, config schema, star schema DDL
 - [x] World builder, per-country calendar, FX engine (`treasury-sim build-world`)
-- [ ] v1: business events and simple lifecycle → Parquet landing
+- [x] v1: business events, invoices and simple lifecycle → Parquet landing + warehouse (`treasury-sim backfill`)
 - [ ] v2: full lifecycle, cut-offs, ledger, sweeps
 - [ ] v3: live stream
 - [ ] v4: anomaly/DQ injection, statement lines, ISO 20022 XML

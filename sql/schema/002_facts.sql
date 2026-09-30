@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS fact_payment (
     account_id        TEXT NOT NULL REFERENCES dim_account(account_id), -- blueprint payer_account_id; our side for both directions
     counterparty_id   TEXT NOT NULL REFERENCES dim_counterparty(counterparty_id),
     type_id           INTEGER NOT NULL REFERENCES dim_payment_type(type_id),
-    channel           TEXT NOT NULL,                 -- [+] API / H2H_FILE / PORTAL / LEGACY_FILE (STP by channel)
+    channel           TEXT NOT NULL,                 -- [+] API / H2H_FILE / PORTAL / LEGACY_FILE, INBOUND for receipts
     sender_country    TEXT NOT NULL,                 -- [+] corridor = sender_country -> receiver_country
     receiver_country  TEXT NOT NULL,                 -- [+]
     amount            NUMERIC NOT NULL,
@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS fact_payment (
     submitted_ts      TIMESTAMP,                     -- [+]
     settled_ts        TIMESTAMP,
     value_date_id     INTEGER REFERENCES dim_date(date_id),  -- [+]
-    status            TEXT NOT NULL CHECK (status IN ('pending','completed','rejected','returned','delayed')),
+    status            TEXT NOT NULL CHECK (status IN ('pending','completed','rejected','returned','delayed')),  -- see lifecycle/simple.py
     failure_reason    TEXT REFERENCES dim_failure_reason(reason_code),
     is_stp            BOOLEAN NOT NULL,              -- [+] no manual touch end-to-end (analysis 3)
     repair_count      INTEGER NOT NULL DEFAULT 0,    -- [+] manual repairs (analysis 3)

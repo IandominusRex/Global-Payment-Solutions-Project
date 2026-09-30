@@ -4,6 +4,8 @@
 seed: 42
 start_date: 2024-10-01          # backfill start (a Tuesday)
 backfill_months: 24             # >= 24 so the 13-week forecast sees a full year-on-year cycle
+warmup_days: 90                 # invoices issued before start_date so receipts don't ramp up from zero
+forward_days: 120               # calendar beyond the last day: open invoice due dates, forecast horizon
 reporting_currency: SGD
 speed_multiplier: 300           # live mode only: 1 real second = 5 simulated minutes
 
@@ -49,18 +51,20 @@ banks:
   - { bank_id: B06, name: Thames Mercantile,     country: GB, bic: THMEGBZZ, is_correspondent: false }
 
 # 11 entities (blueprint: 10-15). SG HQ is the in-house bank and pool header.
+# size scales each entity's share of volume; primary_channel is how it submits payments
+# (the China entities still use legacy files -> lower STP, analysis 3).
 entities:
-  - { entity_id: E01, name: Group Treasury HQ,  country: SG, legal_type: HoldCo,  functional_ccy: SGD, is_in_house_bank: true  }
-  - { entity_id: E02, name: SG Operations,      country: SG, legal_type: OpCo,    functional_ccy: SGD, is_in_house_bank: false }
-  - { entity_id: E03, name: Shanghai Mfg,       country: CN, legal_type: WFOE,    functional_ccy: CNY, is_in_house_bank: false }
-  - { entity_id: E04, name: Shenzhen Sourcing,  country: CN, legal_type: WFOE,    functional_ccy: CNY, is_in_house_bank: false }
-  - { entity_id: E05, name: India Services,     country: IN, legal_type: PvtLtd,  functional_ccy: INR, is_in_house_bank: false }
-  - { entity_id: E06, name: Germany GmbH,       country: DE, legal_type: GmbH,    functional_ccy: EUR, is_in_house_bank: false }
-  - { entity_id: E07, name: Germany Sales Office, country: DE, legal_type: Branch, functional_ccy: EUR, is_in_house_bank: false }
-  - { entity_id: E08, name: Netherlands BV,     country: NL, legal_type: BV,      functional_ccy: EUR, is_in_house_bank: false }
-  - { entity_id: E09, name: UK Ltd,             country: GB, legal_type: Ltd,     functional_ccy: GBP, is_in_house_bank: false }
-  - { entity_id: E10, name: US Inc,             country: US, legal_type: Inc,     functional_ccy: USD, is_in_house_bank: false }
-  - { entity_id: E11, name: US West Distribution, country: US, legal_type: LLC,   functional_ccy: USD, is_in_house_bank: false }
+  - { entity_id: E01, name: Group Treasury HQ,  country: SG, legal_type: HoldCo,  functional_ccy: SGD, is_in_house_bank: true, size: 0.3, primary_channel: API }
+  - { entity_id: E02, name: SG Operations,      country: SG, legal_type: OpCo,    functional_ccy: SGD, is_in_house_bank: false, size: 1.4, primary_channel: API }
+  - { entity_id: E03, name: Shanghai Mfg,       country: CN, legal_type: WFOE,    functional_ccy: CNY, is_in_house_bank: false, size: 1.6, primary_channel: LEGACY_FILE }
+  - { entity_id: E04, name: Shenzhen Sourcing,  country: CN, legal_type: WFOE,    functional_ccy: CNY, is_in_house_bank: false, size: 1.2, primary_channel: LEGACY_FILE }
+  - { entity_id: E05, name: India Services,     country: IN, legal_type: PvtLtd,  functional_ccy: INR, is_in_house_bank: false, size: 0.8, primary_channel: H2H_FILE }
+  - { entity_id: E06, name: Germany GmbH,       country: DE, legal_type: GmbH,    functional_ccy: EUR, is_in_house_bank: false, size: 1.5, primary_channel: H2H_FILE }
+  - { entity_id: E07, name: Germany Sales Office, country: DE, legal_type: Branch, functional_ccy: EUR, is_in_house_bank: false, size: 0.5, primary_channel: PORTAL }
+  - { entity_id: E08, name: Netherlands BV,     country: NL, legal_type: BV,      functional_ccy: EUR, is_in_house_bank: false, size: 0.9, primary_channel: API }
+  - { entity_id: E09, name: UK Ltd,             country: GB, legal_type: Ltd,     functional_ccy: GBP, is_in_house_bank: false, size: 0.9, primary_channel: H2H_FILE }
+  - { entity_id: E10, name: US Inc,             country: US, legal_type: Inc,     functional_ccy: USD, is_in_house_bank: false, size: 1.6, primary_channel: API }
+  - { entity_id: E11, name: US West Distribution, country: US, legal_type: LLC,   functional_ccy: USD, is_in_house_bank: false, size: 0.8, primary_channel: PORTAL }
 
 accounts:
   per_entity: [3, 5]            # min, max accounts per entity (~40 total)
@@ -79,8 +83,13 @@ counterparties:
   high_risk_counterparty_share: 0.03  # ~15 counterparties in high-risk countries (analysis 9)
 
 volumes:
-  payments_per_business_day: 1500
+  payments_per_business_day: 1500   # group-wide target for the scheduled flows below
   annual_growth: 0.08
+  flow_mix:                         # share of daily payments (payroll, tax, IC are scheduled on top)
+    ar_receipt: 0.32
+    ap_payment: 0.30
+    card_spend: 0.35
+    urgent_supplier: 0.03
 
 rails:
   FAST:          { is_instant: true,  is_batch: false, latency_s: [2, 20],      fail_rate: 0.004, max_amount_sgd: 200000 }

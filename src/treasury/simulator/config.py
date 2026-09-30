@@ -6,14 +6,16 @@ a dataset that silently cannot support one of the nine analyses.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Literal
 
+import pandas as pd
 import yaml
 from pydantic import BaseModel, Field, model_validator
 
 RiskRating = Literal["low", "medium", "high"]
+Channel = Literal["API", "H2H_FILE", "PORTAL", "LEGACY_FILE"]
 
 
 class Currency(BaseModel):
@@ -52,6 +54,8 @@ class Entity(BaseModel):
     legal_type: str
     functional_ccy: str
     is_in_house_bank: bool = False
+    size: float = Field(default=1.0, gt=0)
+    primary_channel: Channel = "API"
 
 
 class InterestConfig(BaseModel):
@@ -81,9 +85,24 @@ class CounterpartiesConfig(BaseModel):
         return self
 
 
+class FlowMix(BaseModel):
+    ar_receipt: float = Field(ge=0)
+    ap_payment: float = Field(ge=0)
+    card_spend: float = Field(ge=0)
+    urgent_supplier: float = Field(ge=0)
+
+    @model_validator(mode="after")
+    def _sums_to_one(self) -> FlowMix:
+        total = sum(self.model_dump().values())
+        if abs(total - 1.0) > 1e-6:
+            raise ValueError(f"volumes.flow_mix must sum to 1, got {total}")
+        return self
+
+
 class VolumesConfig(BaseModel):
     payments_per_business_day: int = Field(gt=0)
     annual_growth: float
+    flow_mix: FlowMix
 
 
 class Rail(BaseModel):
@@ -135,6 +154,8 @@ class SimulationConfig(BaseModel):
     seed: int
     start_date: date
     backfill_months: int = Field(ge=1)
+    warmup_days: int = Field(default=90, ge=0)
+    forward_days: int = Field(default=120, ge=0)
     reporting_currency: str
     speed_multiplier: float = Field(gt=0)
     currencies: dict[str, Currency]
@@ -180,11 +201,30 @@ class SimulationConfig(BaseModel):
         for pair in (self.scenarios.slow_corridor, self.scenarios.high_failure_corridor):
             if not set(pair) <= ctys:
                 errors.append(f"scenario corridor {pair} uses unknown country")
+        n_ent = len(self.entities)
+        for t in ("intercompany", "employee_group", "tax_authority"):
+            if round(self.counterparties.mix.get(t, 0) * self.counterparties.count) < n_ent:
+                errors.append(f"counterparties.mix gives fewer {t} than entities ({n_ent})")
         if sum(1 for e in self.entities if e.is_in_house_bank) != 1:
             errors.append("exactly one entity must be the in-house bank (pool header)")
         if errors:
             raise ValueError("Invalid simulation config:\n  - " + "\n  - ".join(errors))
         return self
+
+    @property
+    def data_start(self) -> date:
+        """First calendar day: includes the invoice warm-up before start_date."""
+        return self.start_date - timedelta(days=self.warmup_days)
+
+    @property
+    def end_date(self) -> date:
+        """Last simulated day (inclusive); payments and FX stop here."""
+        return (pd.Timestamp(self.start_date) + pd.DateOffset(months=self.backfill_months)).date() - timedelta(days=1)
+
+    @property
+    def calendar_end(self) -> date:
+        """Last day in dim_date: covers due dates of invoices still open at end_date."""
+        return self.end_date + timedelta(days=self.forward_days)
 
     @property
     def high_risk_countries(self) -> list[str]:

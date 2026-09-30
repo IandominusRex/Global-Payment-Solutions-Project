@@ -140,7 +140,10 @@ def _build_accounts(cfg: SimulationConfig, rng: np.random.Generator) -> pd.DataF
 
 def _build_counterparties(cfg: SimulationConfig, rng: np.random.Generator) -> pd.DataFrame:
     cp = cfg.counterparties
-    types = rng.choice(list(cp.mix), size=cp.count, p=list(cp.mix.values()))
+    # Exact counts per type (not sampled), so small types are never under-represented.
+    counts = {t: round(share * cp.count) for t, share in cp.mix.items()}
+    counts["customer"] += cp.count - sum(counts.values())
+    types = rng.permutation(np.repeat(list(counts), list(counts.values())))
 
     # Counterparty countries: concentrated where the group trades, plus a high-risk tail
     # that takes exactly `high_risk_counterparty_share` of the probability mass.
@@ -152,32 +155,38 @@ def _build_counterparties(cfg: SimulationConfig, rng: np.random.Generator) -> pd
     weights[is_high] *= cp.high_risk_counterparty_share / weights[is_high].sum()
     entity_ids = [e.entity_id for e in cfg.entities]
 
+    # Payroll groups, tax authorities and intercompany counterparties cycle through the
+    # entities so every entity has someone to pay salaries, tax and funding to.
     fakers: dict[str, Faker] = {}
+    per_type: dict[str, int] = {}
     rows = []
     for i, t in enumerate(types):
-        if t == "intercompany":
-            ent = cfg.entities[i % len(cfg.entities)]
-            country, name = ent.country, f"IC {ent.name}"
+        t = str(t)
+        k = per_type[t] = per_type.get(t, -1) + 1
+        home = str(rng.choice(entity_ids))
+        if t in ("intercompany", "employee_group", "tax_authority"):
+            ent = cfg.entities[k % len(cfg.entities)]
+            home, country = ent.entity_id, ent.country
+            name = {"intercompany": f"IC {ent.name}",
+                    "employee_group": f"Payroll {ent.name} {k // len(cfg.entities) + 1}",
+                    "tax_authority": f"Tax Authority {country} ({ent.entity_id})"}[t]
         else:
             country = str(rng.choice(countries, p=weights))
             loc = FAKER_LOCALE.get(country, "en_US")
             fk = fakers.setdefault(loc, Faker(loc))
             fk.seed_instance(cfg.seed * 100_003 + i)
-            name = {
-                "employee_group": f"Payroll {country} {i:03d}",
-                "tax_authority": f"Tax Authority {country} {i:03d}",
-            }.get(str(t), fk.company())
+            name = fk.company()
         rows.append({
             "counterparty_id": f"C{i + 1:04d}",
             "name": name,
-            "counterparty_type": str(t),
+            "counterparty_type": t,
             "country": country,
             "risk_rating": cfg.countries[country].risk_rating,
             "avg_days_late": float(max(0.0, rng.normal(12, 6)))
             if t == "customer" and rng.random() < cfg.scenarios.late_payer_share else 0.0,
             "data_quality_score": float(np.clip(rng.beta(9, 1), 0, 1)),
             "uses_virtual_account": bool(t == "customer" and rng.random() < cp.virtual_account_share),
-            "home_entity_id": str(rng.choice(entity_ids)),
+            "home_entity_id": home,
         })
     df = pd.DataFrame(rows)
 

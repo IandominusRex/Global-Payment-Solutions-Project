@@ -39,7 +39,7 @@ def create_schema(engine: Engine) -> None:
 
 
 def replace_rows(engine: Engine, table: str, df: pd.DataFrame) -> None:
-    """Idempotent load for dimensions / backfill: delete then append (keeps DDL types)."""
+    """Load into an existing DDL table (keeps its types and constraints): delete then append."""
     with engine.begin() as conn:
         conn.execute(text(f"DELETE FROM {table}"))
-        df.to_sql(table, conn, if_exists="append", index=False, chunksize=10_000)
+        df.to_sql(table, conn, if_exists="append", index=False, chunksize=50_000)
