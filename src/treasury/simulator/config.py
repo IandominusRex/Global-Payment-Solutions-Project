@@ -70,6 +70,7 @@ class AccountsConfig(BaseModel):
     force_unpooled_entities: list[str] = []
     overdraft_entities: list[str] = []
     overdraft_limit: float = Field(default=0.0, ge=0)
+    target_scale: float = Field(default=1.0, gt=0)  # scales account target balances with transaction volume
     interest: InterestConfig
 
 
@@ -104,6 +105,7 @@ class FlowMix(BaseModel):
 class VolumesConfig(BaseModel):
     payments_per_business_day: int = Field(gt=0)
     annual_growth: float
+    scheduled_scale: float = Field(default=1.0, gt=0)  # scales payroll, tax and intercompany amounts with volume
     flow_mix: FlowMix
 
 

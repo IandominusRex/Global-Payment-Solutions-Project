@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -9,4 +10,4 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.fixture(scope="session")
 def cfg() -> SimulationConfig:
-    return load_config(ROOT / "config" / "simulation.yaml")
+    return load_config(ROOT / os.environ.get("TREASURY_CONFIG", "config/simulation.yaml"))

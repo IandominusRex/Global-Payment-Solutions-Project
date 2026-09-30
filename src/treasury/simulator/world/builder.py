@@ -98,8 +98,9 @@ def _build_accounts(cfg: SimulationConfig, rng: np.random.Generator) -> pd.DataF
                 "currency_code": str(ccy),
                 "account_type": str(acc_type),
                 "overdraft_limit": 0.0,
-                "target_balance": float(np.round(rng.lognormal(14.0, 0.5) / cfg.currencies[str(ccy)].start_rate_to_sgd,
-                                                 -3)),
+                "target_balance": float(np.round(
+                    rng.lognormal(14.0, 0.5) * cfg.accounts.target_scale / cfg.currencies[str(ccy)].start_rate_to_sgd,
+                    -3)),
                 "is_pooled": False,
                 "pool_header_account_id": None,
             })

@@ -8,6 +8,7 @@ Treasury payments analytics portfolio project. Source lesson plan is in Notion:
 - Full data build: `.venv/bin/treasury-sim backfill` (~2 min). Dimensions/FX only: `treasury-sim build-world`
 - Live mode: `.venv/bin/treasury-sim stream --days 7 --speed 300` (`--speed 0` = no pacing, `--webhook URL`)
 - camt.053: `.venv/bin/treasury-sim export-camt053 --account A001 --date 2026-09-15`
+- Small profile (~106k payments, builds in ~20s, writes to `data_small/`): add `--config config/simulation.small.yaml` to any command. `treasury-sim --config config/simulation.small.yaml export-csv` writes every table to `data_small/csv/`. Tests against it: `TREASURY_CONFIG=config/simulation.small.yaml .venv/bin/pytest`.
 - Tests: `.venv/bin/pytest` (add `-m "not contract"` to skip the ~1 min full-size contract checks) · Lint: `.venv/bin/ruff check src tests`
 - The warehouse is rebuilt from scratch (tables dropped and recreated) on every build.
 

@@ -34,21 +34,22 @@ def test_01_money_movement_sg_cn_is_top_cross_border_corridor(pay):
 
 
 def test_02_flagged_corridors_stand_out(cfg, pay):
+    min_n = max(30, round(200 * cfg.volumes.payments_per_business_day / 1500))  # 200 at the full-size profile
     xb = pay[pay["rail"] == "SWIFT_XBORDER"]
     corridor = [xb["sender_country"], xb["receiver_country"]]
     n = xb.groupby(corridor).size()
-    busy = n[n >= 200].index
+    busy = n[n >= min_n].index
 
     settled = xb[xb["settled_ts"].notna()]
     hours = (settled["settled_ts"] - settled["initiated_ts"]).dt.total_seconds() / 3600
     p90 = hours.groupby([settled["sender_country"], settled["receiver_country"]]).quantile(0.9).loc[busy]
     slow = tuple(cfg.scenarios.slow_corridor)
-    assert n[slow] >= 200
+    assert n[slow] >= min_n
     assert p90[slow] >= 1.5 * p90.median()
 
     fail = xb["status"].isin(["rejected", "returned"]).groupby(corridor).mean().loc[busy]
     bad = tuple(cfg.scenarios.high_failure_corridor)
-    assert n[bad] >= 200
+    assert n[bad] >= min_n
     assert fail[bad] >= 1.5 * fail.median()
 
 

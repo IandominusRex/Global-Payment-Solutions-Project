@@ -4,6 +4,7 @@
   treasury-sim backfill      # full history: world + invoices + payments (v1)
   treasury-sim stream        # live simulated clock continuing after the backfill (v3)
   treasury-sim export-camt053 --account A001 --date 2026-09-15   # ISO 20022 statement XML (v4)
+  treasury-sim export-csv    # every warehouse table as a CSV file (use with the small profile)
 """
 
 from __future__ import annotations
@@ -12,6 +13,8 @@ import argparse
 import time
 from datetime import date
 from pathlib import Path
+
+import pandas as pd
 
 from treasury.simulator.backfill import build_static, run_backfill, write_warehouse
 from treasury.simulator.config import load_config
@@ -28,6 +31,18 @@ def build_world_cmd(config_path: str) -> None:
     print(f"World built in {time.perf_counter() - t0:.1f}s -> {cfg.output.warehouse_url}")
     for name, df in tables.items():
         print(f"  {name:<20} {len(df):>8,} rows")
+
+
+def export_csv(cfg, out: Path) -> None:
+    out.mkdir(parents=True, exist_ok=True)
+    engine = get_engine(cfg.output.warehouse_url)
+    with engine.connect() as conn:
+        tables = [r[0] for r in conn.exec_driver_sql(
+            "select name from sqlite_master where type = 'table' order by name")]
+        for name in tables:
+            df = pd.read_sql_query(f"select * from {name}", conn)
+            df.to_csv(out / f"{name}.csv", index=False)
+            print(f"  {name:<20} {len(df):>8,} rows -> {out / (name + '.csv')}")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -47,6 +62,8 @@ def main(argv: list[str] | None = None) -> None:
     ex.add_argument("--account", required=True)
     ex.add_argument("--date", required=True, type=date.fromisoformat)
     ex.add_argument("--out", type=Path, help="default: data/iso20022/camt053_<account>_<date>.xml")
+    csv = sub.add_parser("export-csv", help="write every warehouse table to a CSV file")
+    csv.add_argument("--out", type=Path, default=Path("data_small/csv"))
     args = parser.parse_args(argv)
 
     if args.cmd == "build-world":
@@ -57,6 +74,8 @@ def main(argv: list[str] | None = None) -> None:
         cfg = load_config(args.config)
         out = args.out or Path("data/iso20022") / f"camt053_{args.account}_{args.date:%Y%m%d}.xml"
         print(export_camt053(get_engine(cfg.output.warehouse_url), args.account, args.date, out))
+    elif args.cmd == "export-csv":
+        export_csv(load_config(args.config), args.out)
     elif args.cmd == "stream":
         run_stream(load_config(args.config), days=args.days, speed=args.speed, max_ticks=args.max_ticks,
                    webhook=args.webhook, landing=not args.no_landing)

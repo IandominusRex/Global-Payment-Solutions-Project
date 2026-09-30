@@ -361,7 +361,7 @@ class _Generator:
         for e in self.cfg.entities:
             e_groups = groups.index[groups["home_entity_id"] == e.entity_id].to_numpy()
             split = rng.dirichlet(np.ones(len(e_groups)) * 4)
-            monthly_sgd = 450_000 * e.size
+            monthly_sgd = 450_000 * e.size * self.cfg.volumes.scheduled_scale
             runs = [(PAYROLL_DAY[e.country], 1.0)] if e.country != "US" else [(15, 0.5), (31, 0.5)]
             for dom, frac in runs:
                 targets = self._month_days(dom)
@@ -388,7 +388,8 @@ class _Generator:
             auth = authorities.index[authorities["home_entity_id"] == e.entity_id][0]
             days = self.cal.roll_forward(np.repeat(e.country, len(self._month_days(15))), self._month_days(15))
             quarterly = np.isin(pd.DatetimeIndex(days).month, [1, 4, 7, 10])
-            sgd = rng.lognormal(np.log(90_000 * e.size), 0.25, len(days)) * np.where(quarterly, 3.0, 1.0)
+            base = 90_000 * e.size * self.cfg.volumes.scheduled_scale
+            sgd = rng.lognormal(np.log(base), 0.25, len(days)) * np.where(quarterly, 3.0, 1.0)
             sgd = sgd * self._growth(days)
             rows.append(pd.DataFrame({
                 "entity_id": e.entity_id, "counterparty_id": auth, "intended_date": days,
@@ -411,25 +412,28 @@ class _Generator:
             if e.entity_id == hq.entity_id:
                 continue
             ccy = "USD" if self.cfg.currencies[e.functional_ccy].is_restricted else e.functional_ccy
+            k = self.cfg.volumes.scheduled_scale
+            digits = -5 if k >= 0.5 else -3
             # Monthly funding HQ -> subsidiary on the 5th business day.
             first = self._month_days(1)
             fund_days = self.cal.add_business_days(np.repeat(hq.country, len(first)), first, 4)
             fund = rng.random(len(fund_days)) < 0.6
-            sgd = np.round(rng.lognormal(np.log(1_200_000 * e.size), 0.5, len(fund_days)), -5)
+            sgd = np.round(rng.lognormal(np.log(1_200_000 * e.size * k), 0.5, len(fund_days)), digits)
             rows.append(pd.DataFrame({
                 "flow": "ic_funding", "entity_id": hq.entity_id, "counterparty_id": ic_for[e.entity_id],
                 "intended_date": fund_days[fund], "currency_code": ccy,
-                "amount": _round_amount(sgd[fund] / self.fx.to_sgd(np.repeat(ccy, fund.sum()), fund_days[fund])),
+                "amount": _round_amount(
+                    sgd[fund] / self.fx.to_sgd(np.repeat(ccy, fund.sum()), fund_days[fund]), digits + 1),
                 "remittance_ref": "IC FUNDING " + e.entity_id,
             }))
             # Quarterly repatriation subsidiary -> HQ, in the subsidiary's own country calendar.
             q = self._month_days(1)[pd.DatetimeIndex(self._month_days(1)).month % 3 == 1]
             rep_days = self.cal.add_business_days(np.repeat(e.country, len(q)), q, 9)
-            sgd = np.round(rng.lognormal(np.log(1_500_000 * e.size), 0.4, len(rep_days)), -5)
+            sgd = np.round(rng.lognormal(np.log(1_500_000 * e.size * k), 0.4, len(rep_days)), digits)
             rows.append(pd.DataFrame({
                 "flow": "ic_repatriation", "entity_id": e.entity_id, "counterparty_id": ic_for[hq.entity_id],
                 "intended_date": rep_days, "currency_code": ccy,
-                "amount": _round_amount(sgd / self.fx.to_sgd(np.repeat(ccy, len(rep_days)), rep_days)),
+                "amount": _round_amount(sgd / self.fx.to_sgd(np.repeat(ccy, len(rep_days)), rep_days), digits + 1),
                 "remittance_ref": "IC REPATRIATION " + e.entity_id,
             }))
         df = pd.concat(rows, ignore_index=True)
@@ -437,8 +441,8 @@ class _Generator:
                          is_batch=False, purpose_code="INTC")
 
 
-def _round_amount(x: np.ndarray) -> np.ndarray:
-    return np.round(x, -4)
+def _round_amount(x: np.ndarray, decimals: int = -4) -> np.ndarray:
+    return np.round(x, decimals)
 
 
 def _degrade_refs(refs: np.ndarray, quality: np.ndarray, rng: np.random.Generator) -> np.ndarray:
