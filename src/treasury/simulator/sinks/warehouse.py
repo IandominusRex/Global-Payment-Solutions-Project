@@ -9,7 +9,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
-from sqlalchemy import Engine, create_engine, event, text
+from sqlalchemy import Connection, Engine, MetaData, Table, create_engine, event, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 SCHEMA_DIR = Path(__file__).resolve().parents[4] / "sql" / "schema"
 
@@ -43,3 +45,27 @@ def replace_rows(engine: Engine, table: str, df: pd.DataFrame) -> None:
     with engine.begin() as conn:
         conn.execute(text(f"DELETE FROM {table}"))
         df.to_sql(table, conn, if_exists="append", index=False, chunksize=50_000)
+
+
+_TABLES: dict[tuple[int, str], Table] = {}
+
+
+def upsert(conn: Connection, table: str, df: pd.DataFrame, keys: list[str]) -> None:
+    """Insert or update rows by primary key (SQLite and PostgreSQL)."""
+    cache_key = (id(conn.engine), table)
+    if cache_key not in _TABLES:
+        _TABLES[cache_key] = Table(table, MetaData(), autoload_with=conn)
+    t = _TABLES[cache_key]
+    records = df.astype(object).where(df.notna(), None).to_dict("records")
+    for r in records:  # pandas Timestamps -> datetime, numpy scalars -> python
+        for k, v in r.items():
+            if isinstance(v, pd.Timestamp):
+                r[k] = v.to_pydatetime()
+            elif hasattr(v, "item"):
+                r[k] = v.item()
+    insert = sqlite_insert if conn.dialect.name == "sqlite" else pg_insert
+    for i in range(0, len(records), 5_000):
+        stmt = insert(t).values(records[i:i + 5_000])
+        update = {c.name: stmt.excluded[c.name] for c in t.columns if c.name not in keys}
+        conn.execute(stmt.on_conflict_do_update(index_elements=keys, set_=update) if update
+                     else stmt.on_conflict_do_nothing(index_elements=keys))

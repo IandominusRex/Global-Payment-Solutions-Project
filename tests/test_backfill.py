@@ -123,3 +123,30 @@ def test_outputs_written(small_cfg, ds):
     assert con.execute("PRAGMA foreign_key_check").fetchall() == []
     tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert not any(t.startswith("label_") or t.startswith("truth") for t in tables)
+
+
+def test_stream_ends_identical_to_a_snapshot(small_cfg, tmp_path):
+    """Streaming tick by tick must leave the warehouse exactly as a snapshot at the same time."""
+    from treasury.simulator.stream import run_stream
+
+    raw = small_cfg.model_dump()
+    raw["output"] = {"landing_dir": tmp_path / "landing", "truth_dir": tmp_path / "truth",
+                     "warehouse_url": f"sqlite:///{tmp_path / 'stream.sqlite'}"}
+    raw["stream"]["tick_sim_seconds"] = 3 * 3600
+    cfg = SimulationConfig.model_validate(raw)
+    sim = run_stream(cfg, days=2, speed=0, log=lambda *_: None)
+    expected = snapshot(sim, backfill_cut(cfg) + pd.Timedelta(days=2), balance_date_max=cfg.end_date)
+
+    con = sqlite3.connect(tmp_path / "stream.sqlite")
+    for table, key in [("fact_payment", "payment_id"), ("fact_payment_event", "event_id"),
+                       ("fact_invoice", "invoice_id"), ("fact_balance", ["date_id", "account_id"])]:
+        got = pd.read_sql(f"SELECT * FROM {table}", con).sort_values(key).reset_index(drop=True)
+        exp = expected.tables[table].sort_values(key).reset_index(drop=True)
+        assert len(got) == len(exp), table
+        for col in ["status"] if "status" in exp else []:
+            assert (got[col].to_numpy() == exp[col].to_numpy()).all(), table
+    got = pd.read_sql("SELECT payment_id, settled_ts FROM fact_payment", con).set_index("payment_id")
+    exp = expected.tables["fact_payment"].set_index("payment_id")["settled_ts"]
+    assert (pd.to_datetime(got["settled_ts"]).reindex(exp.index).fillna(pd.Timestamp(0))
+            == exp.fillna(pd.Timestamp(0))).all()
+    assert list((tmp_path / "landing" / "stream" / "payment").glob("*.parquet"))
