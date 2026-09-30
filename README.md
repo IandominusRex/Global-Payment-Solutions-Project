@@ -39,6 +39,27 @@ the most (about 3% vs under 1% for domestic). Example, from the `fact_payment` a
 Two more, for completeness: `CARD` (corporate card spend, settles in about 2 days) and
 `BOOK_TRANSFER` (between accounts at the same bank, instant).
 
+**How the core tables connect.** Each of our companies owns accounts. Every payment runs between
+one of our accounts and a counterparty, and it carries a step-by-step event history. Invoices say
+what *should* be paid, payments say what *was* paid, and bank statements are the bank's own record.
+Linking those three is the reconciliation problem, so there is deliberately no direct join between them.
+
+```mermaid
+erDiagram
+    dim_entity ||--o{ dim_account : owns
+    dim_entity ||--o{ fact_invoice : "issues / receives"
+    dim_account ||--o{ fact_payment : "pays from / into"
+    dim_counterparty ||--o{ fact_payment : "other side of"
+    dim_counterparty ||--o{ fact_invoice : "billed or billing"
+    dim_payment_type ||--o{ fact_payment : "rail used"
+    fact_payment ||--|{ fact_payment_event : "history of"
+    dim_account ||--o{ fact_balance : "daily closing balance"
+    dim_account ||--o{ fact_statement_line : "bank's record"
+```
+
+The full diagram, with key columns and the reasoning behind each link, is in
+[docs/data-model.md](docs/data-model.md).
+
 **Preview the data without running anything:** see the [dataset card](docs/dataset/dataset-card.md)
 (summary statistics, every column explained, one example record per table) and the
 [sample CSVs](docs/dataset/samples/), which GitHub shows as tables.
@@ -71,6 +92,7 @@ models find what I planted.
 This repo is documented as I go, so the reasoning is visible, not just the result.
 
 - [docs/journal/](docs/journal/) has dated entries: what I did, why, what went wrong, what I changed.
+- [docs/data-model.md](docs/data-model.md) is the ER diagram: how the tables join, and which links are missing on purpose.
 - [docs/dataset-design-review.md](docs/dataset-design-review.md) maps each analysis to the fields it needs.
 - [docs/architecture.md](docs/architecture.md) describes the system design.
 - Commit history is kept small and descriptive, one step per commit.
@@ -103,6 +125,7 @@ pytest                            # add -m "not contract" to skip the ~1 min ful
 | `src/treasury/simulator/` | 1a | Event-driven generator (world, FX, business events, lifecycle, ledger, recon, injectors) |
 | `src/treasury/pipeline/` | 1b | Raw landing → DQ checks → clean → warehouse |
 | `sql/schema/` | 2 | Star schema (SQLite / Postgres) |
+| `sql/exploration/` | – | Ad-hoc queries for getting to know the data (start with `00_first_look.sql`) |
 | `sql/analyses/` | 2 | One query file per analysis (01–09) |
 | `src/treasury/analytics/` | 2/3 | Forecasting (5) and anomaly models (9) |
 | `dashboards/` | 3 | BI files and screenshots |
