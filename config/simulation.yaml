@@ -1,0 +1,128 @@
+# Single source of truth for the simulator. Validated by treasury.simulator.config.
+# Changing a number changes the story the data tells (see docs/dataset-design-review.md).
+
+seed: 42
+start_date: 2024-10-01          # backfill start (a Tuesday)
+backfill_months: 24             # >= 24 so the 13-week forecast sees a full year-on-year cycle
+reporting_currency: SGD
+speed_multiplier: 300           # live mode only: 1 real second = 5 simulated minutes
+
+# Six currencies (blueprint: 5-6). Every entity's functional currency must be in this list.
+currencies:
+  SGD: { name: Singapore Dollar,  decimals: 2, is_restricted: false, start_rate_to_sgd: 1.000,  daily_vol: 0.0000 }
+  USD: { name: US Dollar,         decimals: 2, is_restricted: false, start_rate_to_sgd: 1.340,  daily_vol: 0.0030 }
+  EUR: { name: Euro,              decimals: 2, is_restricted: false, start_rate_to_sgd: 1.450,  daily_vol: 0.0040 }
+  GBP: { name: Pound Sterling,    decimals: 2, is_restricted: false, start_rate_to_sgd: 1.720,  daily_vol: 0.0045 }
+  CNY: { name: Chinese Yuan,      decimals: 2, is_restricted: true,  start_rate_to_sgd: 0.186,  daily_vol: 0.0015 }
+  INR: { name: Indian Rupee,      decimals: 2, is_restricted: true,  start_rate_to_sgd: 0.0161, daily_vol: 0.0020 }
+
+fx:
+  mean_reversion: 0.02          # pull towards start level per day (keeps managed currencies in band)
+  bank_spread_bps: { default: 25, CNY: 60, INR: 60 }
+
+# Countries: entities live in a subset; counterparties can be anywhere.
+# risk_rating is ILLUSTRATIVE for the simulation, not a statement about any real country.
+countries:
+  SG: { name: Singapore,      region: APAC, timezone: Asia/Singapore,     risk_rating: low,    settle_ccy: SGD }
+  CN: { name: China,          region: APAC, timezone: Asia/Shanghai,      risk_rating: medium, settle_ccy: CNY }
+  IN: { name: India,          region: APAC, timezone: Asia/Kolkata,       risk_rating: medium, settle_ccy: INR }
+  DE: { name: Germany,        region: EMEA, timezone: Europe/Berlin,      risk_rating: low,    settle_ccy: EUR }
+  NL: { name: Netherlands,    region: EMEA, timezone: Europe/Amsterdam,   risk_rating: low,    settle_ccy: EUR }
+  GB: { name: United Kingdom, region: EMEA, timezone: Europe/London,      risk_rating: low,    settle_ccy: GBP }
+  US: { name: United States,  region: AMER, timezone: America/New_York,   risk_rating: low,    settle_ccy: USD }
+  VN: { name: Vietnam,        region: APAC, timezone: Asia/Ho_Chi_Minh,   risk_rating: medium, settle_ccy: USD }
+  MY: { name: Malaysia,       region: APAC, timezone: Asia/Kuala_Lumpur,  risk_rating: low,    settle_ccy: USD }
+  ID: { name: Indonesia,      region: APAC, timezone: Asia/Jakarta,       risk_rating: medium, settle_ccy: USD }
+  JP: { name: Japan,          region: APAC, timezone: Asia/Tokyo,         risk_rating: low,    settle_ccy: USD }
+  AU: { name: Australia,      region: APAC, timezone: Australia/Sydney,   risk_rating: low,    settle_ccy: USD }
+  AE: { name: UAE,            region: EMEA, timezone: Asia/Dubai,         risk_rating: medium, settle_ccy: USD }
+  XA: { name: Highrisk Alpha, region: EMEA, timezone: UTC,                risk_rating: high,   settle_ccy: USD }  # fictional
+  XB: { name: Highrisk Beta,  region: AMER, timezone: UTC,                risk_rating: high,   settle_ccy: USD }  # fictional
+
+# Fictional banks only; BICs use the reserved-looking "ZZ" style so they cannot collide with real ones.
+banks:
+  - { bank_id: B01, name: Merlion Global Bank,   country: SG, bic: MGBKSGZZ, is_correspondent: true  }
+  - { bank_id: B02, name: Rhine Commerzhaus,     country: DE, bic: RHCHDEZZ, is_correspondent: true  }
+  - { bank_id: B03, name: Hudson Trust,          country: US, bic: HUTRUSZZ, is_correspondent: true  }
+  - { bank_id: B04, name: Pearl River Bank,      country: CN, bic: PRBKCNZZ, is_correspondent: false }
+  - { bank_id: B05, name: Deccan Commercial,     country: IN, bic: DECMINZZ, is_correspondent: false }
+  - { bank_id: B06, name: Thames Mercantile,     country: GB, bic: THMEGBZZ, is_correspondent: false }
+
+# 11 entities (blueprint: 10-15). SG HQ is the in-house bank and pool header.
+entities:
+  - { entity_id: E01, name: Group Treasury HQ,  country: SG, legal_type: HoldCo,  functional_ccy: SGD, is_in_house_bank: true  }
+  - { entity_id: E02, name: SG Operations,      country: SG, legal_type: OpCo,    functional_ccy: SGD, is_in_house_bank: false }
+  - { entity_id: E03, name: Shanghai Mfg,       country: CN, legal_type: WFOE,    functional_ccy: CNY, is_in_house_bank: false }
+  - { entity_id: E04, name: Shenzhen Sourcing,  country: CN, legal_type: WFOE,    functional_ccy: CNY, is_in_house_bank: false }
+  - { entity_id: E05, name: India Services,     country: IN, legal_type: PvtLtd,  functional_ccy: INR, is_in_house_bank: false }
+  - { entity_id: E06, name: Germany GmbH,       country: DE, legal_type: GmbH,    functional_ccy: EUR, is_in_house_bank: false }
+  - { entity_id: E07, name: Germany Sales Office, country: DE, legal_type: Branch, functional_ccy: EUR, is_in_house_bank: false }
+  - { entity_id: E08, name: Netherlands BV,     country: NL, legal_type: BV,      functional_ccy: EUR, is_in_house_bank: false }
+  - { entity_id: E09, name: UK Ltd,             country: GB, legal_type: Ltd,     functional_ccy: GBP, is_in_house_bank: false }
+  - { entity_id: E10, name: US Inc,             country: US, legal_type: Inc,     functional_ccy: USD, is_in_house_bank: false }
+  - { entity_id: E11, name: US West Distribution, country: US, legal_type: LLC,   functional_ccy: USD, is_in_house_bank: false }
+
+accounts:
+  per_entity: [3, 5]            # min, max accounts per entity (~40 total)
+  pooled_share: 0.6             # rest are deliberately outside the pool (analysis 6)
+  force_unpooled_entities: [E05] # India (restricted INR) idle cash story
+  overdraft_entities: [E06]      # Germany runs an overdraft while others hold idle cash
+  interest:                      # annual rates, used to value the pooling benefit (analysis 6)
+    credit_rate: { SGD: 0.010, USD: 0.020, EUR: 0.005, GBP: 0.015, CNY: 0.003, INR: 0.030 }
+    debit_rate:  { SGD: 0.055, USD: 0.075, EUR: 0.060, GBP: 0.070, CNY: 0.050, INR: 0.105 }
+
+counterparties:
+  count: 500
+  mix: { customer: 0.45, supplier: 0.40, employee_group: 0.05, tax_authority: 0.03, intercompany: 0.07 }
+  virtual_account_share: 0.35   # customers paying into virtual accounts -> clean references (analysis 8)
+  repeat_offender_suppliers: 8  # suppliers with poor data quality -> repeat failures (analysis 4)
+  high_risk_counterparty_share: 0.03  # ~15 counterparties in high-risk countries (analysis 9)
+
+volumes:
+  payments_per_business_day: 1500
+  annual_growth: 0.08
+
+rails:
+  FAST:          { is_instant: true,  is_batch: false, latency_s: [2, 20],      fail_rate: 0.004, max_amount_sgd: 200000 }
+  GIRO:          { is_instant: false, is_batch: true,  cut_off_local: "15:00",  settle_days: 1, fail_rate: 0.010 }
+  MEPS_RTGS:     { is_instant: false, is_batch: false, cut_off_local: "17:30",  settle_days: 0, fail_rate: 0.002 }
+  SEPA_CT:       { is_instant: false, is_batch: true,  cut_off_local: "15:00",  settle_days: 1, fail_rate: 0.006 }
+  SEPA_INST:     { is_instant: true,  is_batch: false, latency_s: [2, 10],      fail_rate: 0.005, max_amount_sgd: 150000 }
+  ACH:           { is_instant: false, is_batch: true,  cut_off_local: "14:45",  settle_days: 1, fail_rate: 0.008 }
+  FEDWIRE:       { is_instant: false, is_batch: false, cut_off_local: "18:00",  settle_days: 0, fail_rate: 0.002 }
+  BACS:          { is_instant: false, is_batch: true,  cut_off_local: "16:00",  settle_days: 2, fail_rate: 0.007 }
+  NEFT:          { is_instant: false, is_batch: true,  cut_off_local: "18:00",  settle_days: 0, fail_rate: 0.012 }
+  CNAPS:         { is_instant: false, is_batch: false, cut_off_local: "17:00",  settle_days: 0, fail_rate: 0.010 }
+  SWIFT_XBORDER: { is_instant: false, is_batch: false, cut_off_local: "16:00",  hops: [1, 4], fail_rate: 0.030, sanctions_hold_rate: 0.02 }
+  CARD:          { is_instant: false, is_batch: true,  settle_days: 2, fail_rate: 0.003 }
+  BOOK_TRANSFER: { is_instant: true,  is_batch: false, latency_s: [0, 1],       fail_rate: 0.0 }
+
+# Deliberate stories each analysis must be able to find (asserted by tests/test_analysis_contracts.py).
+scenarios:
+  slow_corridor: [SG, VN]           # extra hops
+  high_failure_corridor: [US, IN]
+  legacy_file_channel_stp_penalty: 0.10
+  late_payer_share: 0.25
+
+anomalies:                          # business anomalies: valid money movements, labelled in label_anomaly
+  duplicate_payment_rate: 0.002
+  structuring_threshold_sgd: 20000
+  structuring_rate: 0.001           # amounts in [0.9, 1.0) x threshold
+  round_amount_rate: 0.003
+  burst_rate: 0.0005
+  high_risk_country_share: 0.01
+  new_beneficiary_high_value_rate: 0.001
+  off_hours_rate: 0.002
+
+data_quality:                       # dirty-data defects: raw layer only, never posted to the ledger
+  null_purpose_code_rate: 0.03
+  bad_currency_code_rate: 0.0005    # e.g. "usd", "SGP", "EUR " - NOT real ISO codes like SDG
+  negative_amount_rate: 0.0003
+  time_order_violation_rate: 0.0005
+  resent_file_duplicate_rate: 0.001
+  inconsistent_country_name_rate: 0.002
+
+output:
+  landing_dir: data/landing         # raw (dirty) timestamped batches, Parquet
+  warehouse_url: sqlite:///data/warehouse/treasury.sqlite
+  truth_dir: data/truth             # hidden ground-truth labels, never loaded into the warehouse

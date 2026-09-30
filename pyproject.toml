@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "treasury-payments-analytics"
+version = "0.1.0"
+description = "Synthetic treasury payments simulator, warehouse, analytics and API (portfolio project)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "pyarrow>=15",
+    "pydantic>=2.6",
+    "pyyaml>=6",
+    "holidays>=0.50",
+    "faker>=24",
+    "sqlalchemy>=2.0",
+]
+
+[project.optional-dependencies]
+api = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
+ml = ["scikit-learn>=1.4", "statsmodels>=0.14"]
+dev = ["pytest>=8", "ruff>=0.4", "ipykernel>=6"]
+
+[project.scripts]
+treasury-sim = "treasury.simulator.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/treasury"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "contract: per-analysis viability checks on a generated dataset (skipped until the payment engine exists)",
+]
+
+[tool.ruff]
+line-length = 120
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/treasury/simulator/world/reference.py" = ["E501"]

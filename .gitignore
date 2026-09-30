@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Generated data (always reproducible from config + seed)
+data/*
+!data/.gitkeep
+*.sqlite
+*.db
+*.parquet
+
+# Environment
+.env
+
+# Editors / OS
+.DS_Store
+.vscode/
+.idea/
+
+# Notebooks
+.ipynb_checkpoints/
