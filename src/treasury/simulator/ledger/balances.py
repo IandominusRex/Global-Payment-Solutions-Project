@@ -39,8 +39,10 @@ from treasury.simulator.world.calendar import BusinessCalendar
 
 SCHEDULED_FLOWS = {"ap_payment", "payroll", "tax", "ic_funding", "ic_repatriation"}
 # Event kinds and their priority at equal timestamps.
-FUNDING, DEBIT, CREDIT, REVERSAL, EOD = 0, 1, 2, 3, 4
-PRIORITY = {FUNDING: 0, DEBIT: 1, CREDIT: 2, REVERSAL: 3, EOD: 9}
+FUNDING, DEBIT, CREDIT, REVERSAL, SWEEP, EOD = 0, 1, 2, 3, 4, 5
+# At equal timestamps every entity sweeps before any entity snapshots: entities in the same
+# timezone share an end-of-day instant, and a sweep into HQ must land before HQ's snapshot.
+PRIORITY = {FUNDING: 0, DEBIT: 1, CREDIT: 2, REVERSAL: 3, SWEEP: 8, EOD: 9}
 
 
 @dataclass
@@ -100,8 +102,9 @@ class _Ledger:
         recv = p["amount_received"].fillna(0).to_numpy()
         fees = p["fees"].to_numpy()
         self.p_acct = np.array([self.aidx[a] for a in p["account_id"]])
-        self.p_delta = np.where(out, -(amt + fees) * conv, recv * conv)
-        self.p_reversal = np.where(out, amt * conv, -recv * conv)
+        # Banks book in cents: every posting is rounded, so statements reconcile exactly.
+        self.p_delta = np.round(np.where(out, -(amt + fees) * conv, recv * conv), 2)
+        self.p_reversal = np.round(np.where(out, amt * conv, -recv * conv), 2)
         self.p_ts = np.where(out, debit_ts, credit_ts)
 
         ev_ts = [self.p_ts[live]]
@@ -121,9 +124,10 @@ class _Ledger:
         for ei, eid in enumerate(self.entities):
             tz = self.ent.loc[eid, "timezone"]
             eod = (days + pd.Timedelta(hours=23, minutes=59, seconds=59)).tz_localize(tz).tz_convert("UTC")
-            ts.append(eod.tz_localize(None).values.astype("datetime64[s]").astype(np.int64))
-            kind.append(np.full(len(days), EOD))
-            ref.append(np.full(len(days), ei))
+            eod_s = eod.tz_localize(None).values.astype("datetime64[s]").astype(np.int64)
+            ts += [eod_s, eod_s]
+            kind += [np.full(len(days), SWEEP), np.full(len(days), EOD)]
+            ref += [np.full(len(days), ei), np.full(len(days), ei)]
             if eid == self.hq:
                 continue
             bdays = self.cal.business_days(self.ent.loc[eid, "country"])
@@ -142,7 +146,7 @@ class _Ledger:
         daily_out = np.bincount(self.p_acct[out & window], weights=-self.p_delta[out & window],
                                 minlength=len(acc)) / (first_days * 5 / 7)
         opening = acc["target_balance"].to_numpy(float) + self.cfg.ledger.opening_days_of_outflow * daily_out
-        return [0.0 if pooled else float(o) for o, pooled in zip(opening, self.pooled, strict=True)]
+        return [0.0 if pooled else round(float(o), 2) for o, pooled in zip(opening, self.pooled, strict=True)]
 
     def _scheduled_outflow_index(self):
         """Per account: sorted debit times and cumulative scheduled outflow, for the funding rule."""
@@ -239,7 +243,7 @@ class _Ledger:
                             break
                         if s == a or self.ccy[s] != self.ccy[a]:
                             continue
-                        take = min(need, proj[s] - self.cfg.ledger.concentration_keep * self.target[s])
+                        take = round(min(need, proj[s] - self.cfg.ledger.concentration_keep * self.target[s]), 2)
                         if take > 0:
                             bal[s] -= take
                             bal[a] += take
@@ -261,20 +265,24 @@ class _Ledger:
                         if amount > 0:
                             self._ic_transfer(loop, t, a, self.hq_header[self.ccy[a]], amount, "ic_concentration",
                                               topups, topup_legs)
-            elif k == EOD:
+            elif k == SWEEP:
                 eid = self.entities[r]
                 local_day = pd.Timestamp(t, unit="s").tz_localize("UTC").tz_convert(
                     self.ent.loc[eid, "timezone"]).date()
                 for a in acct_by_entity[eid]:
                     h = self.header_of[a]
                     if self.pooled[a] and h is not None and abs(bal[a]) > 0.005:
-                        amt = bal[a]
+                        amt = round(bal[a], 2)
                         bal[h] += amt
-                        bal[a] = 0.0
+                        bal[a] -= amt
                         src, dst = (a, h) if amt > 0 else (h, a)
                         sweeps.append((t, local_day, src, dst, abs(amt), "zba"))
                         postings.append((t, a, -amt, "sweep", len(sweeps) - 1))
                         postings.append((t, h, amt, "sweep", len(sweeps) - 1))
+            elif k == EOD:
+                eid = self.entities[r]
+                local_day = pd.Timestamp(t, unit="s").tz_localize("UTC").tz_convert(
+                    self.ent.loc[eid, "timezone"]).date()
                 for a in acct_by_entity[eid]:
                     balances.append((local_day, a, bal[a], t))
 
@@ -309,7 +317,7 @@ class _Ledger:
         transit = self.rng.uniform(5, 60) if same_country else self.rng.lognormal(np.log(7200), 0.4)
         settled = routed + int(transit)
         rate = 1.0 if self.ccy[src] == self.ccy[dst] else self._cross_rate(self.ccy[dst], self.ccy[src], settled)
-        legs.append((src, -amount * rate))
+        legs.append((src, round(-amount * rate, 2)))
         loop.schedule(routed, PRIORITY[DEBIT], DEBIT, -len(legs))
         legs.append((dst, amount))
         loop.schedule(settled, PRIORITY[CREDIT], CREDIT, -len(legs))

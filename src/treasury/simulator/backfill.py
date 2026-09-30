@@ -20,9 +20,12 @@ from treasury.simulator import asof
 from treasury.simulator.business import events
 from treasury.simulator.business.events import Fx
 from treasury.simulator.config import SimulationConfig
+from treasury.simulator.inject import anomalies, data_quality
 from treasury.simulator.ledger import balances as ledger
 from treasury.simulator.lifecycle import state_machine, timing
+from treasury.simulator.market import hedging
 from treasury.simulator.market.fx import build_fx_rates
+from treasury.simulator.recon import statements
 from treasury.simulator.sinks.warehouse import create_schema, get_engine, replace_rows
 from treasury.simulator.world.builder import World, build_world
 from treasury.simulator.world.calendar import BusinessCalendar, build_dim_calendar, build_dim_date
@@ -58,6 +61,9 @@ class Simulation:
     sweeps: pd.DataFrame
     postings: pd.DataFrame
     opening: pd.Series
+    statement_lines: pd.DataFrame  # includes internal _posting_ts
+    statement_truth: pd.DataFrame
+    hedges: pd.DataFrame
     horizon_end: date
 
 
@@ -76,15 +82,21 @@ def run_simulation(cfg: SimulationConfig, horizon_end: date | None = None) -> Si
     horizon_end = horizon_end or cfg.end_date
     world, static, cal, fx = build_static(cfg, horizon_end)
     invoices, intents, alloc = events.generate(cfg, world, cal, fx, end=np.datetime64(horizon_end))
+    intents, world = anomalies.inject(cfg, world, fx, intents)
+    static["dim_counterparty"] = world.dim_counterparty
     payments = timing.run(cfg, world, cal, fx, intents)
     led = ledger.run(cfg, world, cal, fx, payments, np.datetime64(horizon_end) + np.timedelta64(2, "D"))
     payments = led.payments
     first = payments[payments["_mirror_of"].isna()].drop_duplicates("intent_id")[["intent_id", "payment_id"]]
     allocation = alloc.merge(first, on="intent_id")[["payment_id", "invoice_id", "allocated_amount"]]
     ev = state_machine.build_events(payments, world.dim_account)
+    lines, line_truth = statements.build(led.postings, payments, world.dim_account, world.dim_entity,
+                                         world.dim_counterparty)
+    hedges = hedging.build(cfg, payments, world.dim_entity, cal, fx)
     return Simulation(cfg=cfg, world=world, static=static, fx=fx, invoices=invoices, allocation=allocation,
                       payments=payments, events=ev, balances=led.balances, sweeps=led.sweeps,
-                      postings=led.postings, opening=led.opening, horizon_end=horizon_end)
+                      postings=led.postings, opening=led.opening, statement_lines=lines,
+                      statement_truth=line_truth, hedges=hedges, horizon_end=horizon_end)
 
 
 def snapshot(sim: Simulation, t: pd.Timestamp, balance_date_max: date | None = None) -> Dataset:
@@ -132,12 +144,21 @@ def snapshot(sim: Simulation, t: pd.Timestamp, balance_date_max: date | None = N
         "fact_payment_event": ev.reset_index(drop=True),
         "fact_balance": bal.drop(columns="_eod_ts").reset_index(drop=True),
         "fact_sweep": sw.reset_index(drop=True),
+        "fact_statement_line": cut_lines(sim.statement_lines, t),
+        "fact_fx_hedge": sim.hedges[sim.hedges["_trade_date"] <= t].drop(columns="_trade_date").reset_index(drop=True),
     })
+    lines = tables["fact_statement_line"]["line_id"]
     truth = {
         "payment_invoice": sim.allocation[sim.allocation["payment_id"].isin(p["payment_id"])].reset_index(drop=True),
         "payment_flow": p[["payment_id", "flow", "entity_id"]],
+        "label_anomaly": p.loc[p["anomaly_type"].notna(), ["payment_id", "anomaly_type"]].reset_index(drop=True),
+        "statement_payment": sim.statement_truth[sim.statement_truth["line_id"].isin(lines)].reset_index(drop=True),
     }
     return Dataset(tables=tables, truth=truth)
+
+
+def cut_lines(lines: pd.DataFrame, t: pd.Timestamp) -> pd.DataFrame:
+    return lines[lines["_posting_ts"] <= t].drop(columns="_posting_ts").reset_index(drop=True)
 
 
 def backfill_cut(cfg: SimulationConfig) -> pd.Timestamp:
@@ -155,14 +176,20 @@ def _date_id(s: pd.Series) -> pd.Series:
 # ---------------------------------------------------------------- sinks
 
 LANDING = {"payments": ("fact_payment", "initiated_ts"), "invoices": ("fact_invoice", "issue_date_id"),
-           "payment_events": ("fact_payment_event", "event_ts")}
+           "payment_events": ("fact_payment_event", "event_ts"),
+           "bank_statements": ("fact_statement_line", "booking_date_id")}
 
 
 def write_landing(cfg: SimulationConfig, ds: Dataset) -> None:
-    """Raw timestamped batches, one Parquet file per month, like host-to-host drops."""
+    """Raw timestamped batches, one Parquet file per month, like host-to-host drops.
+
+    The payments files carry injected data-quality defects (labels in data/truth/label_dq).
+    """
     root = Path(cfg.output.landing_dir)
     for name, (table, ts_col) in LANDING.items():
         df = ds.tables[table]
+        if table == "fact_payment":
+            df = data_quality.apply(cfg, df)
         out = root / name
         out.mkdir(parents=True, exist_ok=True)
         for old in out.glob("*.parquet"):
@@ -179,6 +206,7 @@ def write_truth(cfg: SimulationConfig, ds: Dataset) -> None:
     truth_dir.mkdir(parents=True, exist_ok=True)
     for name, df in ds.truth.items():
         df.to_parquet(truth_dir / f"{name}.parquet", index=False)
+    data_quality.label(cfg, ds.tables["fact_payment"]).to_parquet(truth_dir / "label_dq.parquet", index=False)
 
 
 def write_warehouse(cfg: SimulationConfig, tables: dict[str, pd.DataFrame]) -> None:

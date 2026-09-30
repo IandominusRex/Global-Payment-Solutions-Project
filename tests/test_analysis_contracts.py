@@ -110,16 +110,37 @@ def test_07_fx_exposure_long_eur_short_cny(ds, pay):
     assert net["CNY"] < 0
 
 
-def test_08_virtual_account_payers_have_cleaner_references(ds, pay):
-    ar = pay[pay["flow"] == "ar_receipt"]
-    alloc = ds.truth["payment_invoice"].set_index("payment_id")["invoice_id"]
+def test_08_virtual_account_payers_reconcile_better(ds):
+    """Match bank statement credits to invoices by reference, as a treasury system would."""
+    lines = ds.tables["fact_statement_line"].merge(ds.truth["statement_payment"], on="line_id")
+    flow = ds.truth["payment_flow"].set_index("payment_id")["flow"]
+    ar = lines[(lines["bank_tx_code"] == "RCDT") & (lines["payment_id"].map(flow) == "ar_receipt")]
     refs = ds.tables["fact_invoice"].set_index("invoice_id")["invoice_ref"]
-    true_ref = refs.reindex(alloc.reindex(ar["payment_id"]).to_numpy()).to_numpy()
-    exact = ar["remittance_ref"].to_numpy() == true_ref
-    va = ds.tables["dim_counterparty"].set_index("counterparty_id").loc[ar["counterparty_id"], "uses_virtual_account"]
-    by_va = pd.Series(exact).groupby(va.to_numpy()).mean()
-    assert by_va[True] - by_va[False] >= 0.20
+    alloc = ds.truth["payment_invoice"]
+    true_refs = alloc.assign(ref=refs.reindex(alloc["invoice_id"]).to_numpy()).groupby("payment_id")["ref"].apply(list)
+    matched = [isinstance(info, str) and all(r in info for r in true_refs.get(pid, ["<none>"]))
+               for info, pid in zip(ar["remittance_info"], ar["payment_id"], strict=True)]
+    payer = ds.tables["fact_payment"].set_index("payment_id").loc[ar["payment_id"], "counterparty_id"]
+    va = ds.tables["dim_counterparty"].set_index("counterparty_id").loc[payer, "uses_virtual_account"].to_numpy()
+    rate = pd.Series(matched).groupby(va).mean()
+    assert rate[True] - rate[False] >= 0.20
+    # Real-world messiness exists: part payments and multi-invoice payments.
+    assert (ds.tables["fact_invoice"]["status"] == "part_paid").sum() > 0
+    assert (alloc.groupby("payment_id").size() > 1).sum() > 0
 
 
-def test_09_enough_labelled_anomalies():
-    pytest.skip("needs anomaly injection with labels (v4)")
+def test_09_enough_labelled_anomalies(ds):
+    labels = ds.truth["label_anomaly"]
+    counts = labels["anomaly_type"].value_counts()
+    from treasury.simulator.inject.anomalies import ANOMALY_TYPES
+    assert set(counts.index) == set(ANOMALY_TYPES)
+    assert (counts >= 100).all(), counts.to_dict()
+    assert labels["payment_id"].isin(ds.tables["fact_payment"]["payment_id"]).all()
+    # Labelled anomalies are a small minority, as in real alert queues.
+    assert len(labels) / len(ds.tables["fact_payment"]) < 0.03
+
+
+def test_07b_hedge_book_covers_part_of_the_exposure(ds):
+    h = ds.tables["fact_fx_hedge"]
+    assert len(h) > 0
+    assert set(h["sell_currency"]) & {"EUR"} and set(h["buy_currency"]) & {"CNY"}

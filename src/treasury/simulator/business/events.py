@@ -99,7 +99,54 @@ def generate(cfg: SimulationConfig, world: World, cal: BusinessCalendar, fx: Fx,
     allocation = pd.DataFrame({"intent_id": intents.loc[has_inv, "intent_id"],
                                "invoice_id": intents.loc[has_inv, "invoice_id"],
                                "allocated_amount": intents.loc[has_inv, "amount"]}).reset_index(drop=True)
+    intents, allocation = _customer_payment_habits(cfg, world, intents, allocation)
     return invoices, intents, allocation
+
+
+SHORT_PAY_RATE = 0.03        # free-text payers who deduct something (disputes, bank charges)
+CONSOLIDATE_RATE = 0.12      # free-text payers who pay several invoices in one go
+
+
+def _customer_payment_habits(cfg: SimulationConfig, world: World, intents: pd.DataFrame,
+                             allocation: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Short payments and one-payment-many-invoices from customers without virtual accounts.
+
+    These are what make real reconciliation hard (analysis 8). Virtual-account payers pay
+    each invoice exactly, which is the point of virtual accounts.
+    """
+    rng = stream(cfg.seed, "events.ar_habits")
+    va = world.dim_counterparty.set_index("counterparty_id")["uses_virtual_account"]
+    ar = (intents["flow"] == "ar_receipt").to_numpy() & ~va.reindex(intents["counterparty_id"]).fillna(False).to_numpy()
+
+    short = ar & (rng.random(len(intents)) < SHORT_PAY_RATE)
+    intents.loc[short, "amount"] = np.round(intents.loc[short, "amount"] * rng.uniform(0.90, 0.99, short.sum()), 2)
+    alloc_amt = allocation.set_index("intent_id")["allocated_amount"]
+    alloc_amt.loc[intents.loc[short, "intent_id"]] = intents.loc[short, "amount"].to_numpy()
+    allocation["allocated_amount"] = alloc_amt.to_numpy()
+
+    pick = ar & ~short & (rng.random(len(intents)) < CONSOLIDATE_RATE)
+    cand = intents[pick]
+    week = pd.to_datetime(cand["intended_date"]).dt.to_period("W").astype(str)
+    groups = cand.groupby([cand["entity_id"], cand["counterparty_id"], cand["currency_code"], week])["intent_id"]
+    carrier = groups.transform("min")
+    size = groups.transform("size")
+    merged = cand[size > 1].assign(carrier=carrier[size > 1])
+    if len(merged):
+        def join_refs(refs: pd.Series) -> str:
+            return "; ".join(r for r in refs if isinstance(r, str))
+
+        agg = merged.groupby("carrier").agg(amount=("amount", "sum"), intended_date=("intended_date", "max"),
+                                            refs=("remittance_ref", join_refs))
+        idx = intents.set_index("intent_id")
+        idx.loc[agg.index, "amount"] = agg["amount"].round(2)
+        idx.loc[agg.index, "intended_date"] = agg["intended_date"]
+        idx.loc[agg.index, "remittance_ref"] = agg["refs"].str.slice(0, 140).replace("", None)
+        idx.loc[agg.index, "invoice_id"] = None
+        dropped = merged.loc[merged["intent_id"] != merged["carrier"], "intent_id"]
+        intents = idx.drop(index=dropped).reset_index()
+        remap = merged.set_index("intent_id")["carrier"]
+        allocation["intent_id"] = allocation["intent_id"].map(remap).fillna(allocation["intent_id"]).astype(int)
+    return intents[INTENT_COLUMNS + ["intent_id"]], allocation
 
 
 class _Generator:

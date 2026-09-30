@@ -150,3 +150,57 @@ def test_stream_ends_identical_to_a_snapshot(small_cfg, tmp_path):
     assert (pd.to_datetime(got["settled_ts"]).reindex(exp.index).fillna(pd.Timestamp(0))
             == exp.fillna(pd.Timestamp(0))).all()
     assert list((tmp_path / "landing" / "stream" / "payment").glob("*.parquet"))
+
+
+def test_bank_statements_reconcile_to_the_ledger(small_cfg, sim, ds):
+    lines = ds.tables["fact_statement_line"]
+    cut = backfill_cut(small_cfg)
+    signed = np.where(lines["credit_debit"] == "CRDT", 1, -1) * lines["amount"]
+    by_acct = pd.Series(signed).groupby(lines["account_id"].to_numpy()).sum()
+    post = sim.postings[sim.postings["posting_ts"] <= cut].groupby("account_id")["delta"].sum()
+    assert np.allclose(by_acct.reindex(post.index).fillna(0), post, atol=0.05)
+    truth = ds.truth["statement_payment"]
+    assert truth["line_id"].isin(lines["line_id"]).all() and lines["line_id"].is_unique
+
+
+def test_raw_landing_is_dirty_but_warehouse_is_clean(small_cfg, ds):
+    raw = pd.concat(pd.read_parquet(f) for f in (small_cfg.output.landing_dir / "payments").glob("*.parquet"))
+    labels = pd.read_parquet(small_cfg.output.truth_dir / "label_dq.parquet")
+    assert set(labels["defect_type"]) >= {"null_purpose_code", "resent_file_duplicate"}
+    n_dup = (labels["defect_type"] == "resent_file_duplicate").sum()
+    assert len(raw) == len(ds.tables["fact_payment"]) + n_dup
+    assert (raw["amount"] < 0).sum() == (labels["defect_type"] == "negative_amount").sum()
+    wh = ds.tables["fact_payment"]
+    assert (wh["amount"] > 0).all() and wh["purpose_code"].notna().all()
+    assert wh["currency_code"].isin(small_cfg.currencies).all() and wh["payment_id"].is_unique
+
+
+def test_anomalies_are_labelled_and_new_beneficiaries_are_new(ds):
+    labels = ds.truth["label_anomaly"]
+    p = ds.tables["fact_payment"].merge(labels, on="payment_id")
+    nb = p[p["anomaly_type"] == "new_beneficiary_high_value"]
+    cps = ds.tables["dim_counterparty"].set_index("counterparty_id")
+    first = pd.to_datetime(cps.loc[nb["counterparty_id"], "first_seen_date"]).to_numpy()
+    assert (pd.to_datetime(nb["initiated_ts"]).dt.normalize().to_numpy() == first).all()
+
+
+def test_camt053_export_balances(small_cfg, ds):
+    import xml.etree.ElementTree as ET
+
+    from treasury.simulator.sinks.iso20022 import NS, build_camt053
+    from treasury.simulator.sinks.warehouse import get_engine
+
+    lines = ds.tables["fact_statement_line"]
+    busiest = lines.groupby(["account_id", "booking_date_id"]).size().idxmax()
+    day = pd.to_datetime(str(busiest[1])).date()
+    tree = build_camt053(get_engine(small_cfg.output.warehouse_url), busiest[0], day)
+    ns = {"c": NS}
+    entries = tree.getroot().findall(".//c:Ntry", ns)
+    assert len(entries) == len(lines[(lines["account_id"] == busiest[0]) & (lines["booking_date_id"] == busiest[1])])
+    bals = {b.find(".//c:Cd", ns).text: float(b.find("c:Amt", ns).text) * (1 if b.find("c:CdtDbtInd", ns).text
+                                                                           == "CRDT" else -1)
+            for b in tree.getroot().findall(".//c:Bal", ns)}
+    moved = sum(float(e.find("c:Amt", ns).text) * (1 if e.find("c:CdtDbtInd", ns).text == "CRDT" else -1)
+                for e in entries)
+    assert abs(bals["OPBD"] + moved - bals["CLBD"]) < 0.05
+    ET.tostring(tree.getroot())  # serialises

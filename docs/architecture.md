@@ -3,61 +3,102 @@
 ```
                      config/simulation.yaml  (validated by simulator/config.py)
                                   │
-   ┌──────────────────────────────┴───────────────────────────────┐
-   │ Part 1a  SIMULATOR  (src/treasury/simulator)                 │
-   │  world/  ─ dimensions, calendar                 [implemented]│
-   │  market/ ─ FX fixings                           [implemented]│
-   │  business/ ─ invoices, payroll, AP runs, tax, card     [v1]  │
-   │  lifecycle/ ─ payment state machine, rails, cut-offs   [v2]  │
-   │  ledger/ ─ value-date posting, EOD balances, sweeps    [v2]  │
-   │  recon/ ─ bank statement lines                         [v4]  │
-   │  inject/ ─ anomalies (pre-ledger), DQ defects (post)   [v4]  │
-   │  engine.py + clock.py ─ discrete-event loop, live mode [v1/3]│
-   └───────────────┬───────────────────────────┬──────────────────┘
-                   │ raw, dirty batches        │ hidden labels
-                   ▼                           ▼
-            data/landing/*.parquet        data/truth/*.parquet   (never loaded)
-                   │
-   ┌───────────────┴──────────────────┐
-   │ Part 1b  PIPELINE (src/treasury/pipeline) │  DQ checks → quarantine → clean → load
-   └───────────────┬──────────────────┘
-                   ▼
-   ┌──────────────────────────────────┐
-   │ Part 2  WAREHOUSE  sql/schema/   │  star schema, SQLite (WAL) or Postgres
-   │         sql/analyses/  01…09     │  one SQL file per analysis
-   └──────┬─────────────────┬─────────┘
-          ▼                 ▼
-   Part 3 dashboards/   Part 4 src/treasury/api  (FastAPI, bearer token)
-   (Power BI / web BI)      ▲
-          └─────────────────┘  dashboards may read KPIs from the API
-          src/treasury/analytics: forecasting (5) and anomaly models (9) in Python
+   ┌──────────────────────────────┴────────────────────────────────────────┐
+   │ Part 1a  SIMULATOR  (src/treasury/simulator)                          │
+   │  world/      dimensions, per-country calendar                         │
+   │  market/     FX fixings, monthly hedge book                           │
+   │  business/   invoices → payment intents (AR, AP runs, payroll, tax,   │
+   │              card, intercompany), multi-invoice and short payments    │
+   │  inject/     anomalies (before the lifecycle, labelled)               │
+   │  lifecycle/  timing.py: rail, channel, cut-offs, hops, holds, failures│
+   │              state_machine.py: the timestamped event trail            │
+   │  ledger/     discrete-event replay: AM04, funding, sweeps, balances   │
+   │  recon/      bank statement lines (camt.053 view)                     │
+   │  asof.py     what is visible at simulated time t                      │
+   │  backfill.py run_simulation() → snapshot(t) → sinks                   │
+   │  stream.py + clock.py  live mode: successive snapshots on a clock     │
+   └──────┬──────────────────────────┬──────────────────────┬──────────────┘
+          │ raw batches + DQ defects │ hidden labels         │ clean load / upserts
+          ▼                          ▼                       ▼
+   data/landing/*.parquet     data/truth/*.parquet     Part 2 WAREHOUSE (sql/schema/)
+          │                   (never loaded)            SQLite (WAL) or Postgres
+          ▼                                                  │
+   Part 1b PIPELINE (src/treasury/pipeline)  ─ clean ───────►│
+                                                             ▼
+                                   Part 3 dashboards/   Part 4 src/treasury/api
+                                   src/treasury/analytics (forecast 5, anomaly models 9)
 ```
+
+The simulator loads the warehouse with clean data directly, so Parts 2–4 are never blocked.
+The raw landing files carry the same payments with injected defects. Cleaning them in
+Part 1b and comparing the result with the warehouse and `label_dq` is the Part 1 exercise.
 
 ## Principles
 
-1. **Simulate the business, derive the tables.** Payments come from invoices and schedules;
-   balances come only from settled payments. Nothing is generated independently.
-2. **One engine, two clocks.** Backfill and live stream run identical code; the clock only
-   paces emission. Same seed → same data.
+1. **Simulate the business, derive the tables.** Payments come from invoices and schedules.
+   Balances come only from settled payments, and statements only from ledger postings.
+2. **Compute the future once, then show it as of a moment.** `run_simulation()` decides
+   every payment's full outcome. `snapshot(t)` shows only what happened by `t`. A backfill is
+   the snapshot at the end of the last day. The live stream takes successive snapshots.
+   Both use the same engine, so a stream stopped at `t` equals a backfill to `t` (tested).
 3. **Independent RNG streams per engine** (`rng.stream(seed, name)`), so changing one engine
-   does not reshuffle the others.
-4. **Truth is hidden.** Anomaly labels, DQ labels and true invoice allocations live in
-   `data/truth/` and are used only for scoring.
-5. **Dirty data lives only in the raw layer.** The ledger is always clean and reconciles.
-6. **UTC everywhere**, with each entity's timezone for local business dates and cut-offs.
+   does not reshuffle the others. The same seed and horizon always give the same data.
+4. **Truth is hidden.** Anomaly labels, DQ labels, true invoice allocations and the
+   statement-line → payment link live in `data/truth/` and are used only for scoring.
+5. **Dirty data lives only in the raw layer.** The ledger and warehouse are always clean.
+6. **UTC everywhere.** Local business dates, cut-offs and end-of-day use each entity's
+   timezone and `dim_calendar`.
+7. **Banks book in cents.** Every ledger posting is rounded, so statements reconcile exactly.
 
-## Business flows (v1)
+## Business flows
 
 | Flow | Schedule | Amount shape | Rails |
 |---|---|---|---|
-| Customer receipts (AR) | invoice due date + payer lateness | log-normal | SEPA_CT, ACH, FAST, SWIFT |
-| Supplier payments (AP) | weekly runs (Tue/Thu) | log-normal, heavy tail | GIRO, SEPA_CT, CNAPS, SWIFT |
-| Payroll | fixed day per country, holiday-shifted | stable, slow growth | GIRO, BACS, NEFT, ACH |
-| Intercompany funding | rule on projected balance | round-ish | MEPS_RTGS, SWIFT, BOOK_TRANSFER |
-| Urgent supplier | random, small share | medium | FAST, SEPA_INST |
-| Tax | monthly / quarterly per country | large, predictable | RTGS / domestic |
+| Customer receipts (AR) | due date + payer lateness. Some pay several invoices at once or short-pay | log-normal | SEPA, ACH, FAST, GIRO, SWIFT |
+| Supplier payments (AP) | weekly runs (Tue/Thu) before the due date | log-normal, heavy tail | GIRO, SEPA_CT, CNAPS, ACH, SWIFT |
+| Urgent supplier | same day | medium | FAST, SEPA_INST, FEDWIRE |
+| Payroll | fixed day per country, rolled back over holidays | stable, bonus month | GIRO, BACS, NEFT, ACH |
+| Tax | monthly, quarterly instalments | large, predictable | MEPS_RTGS, FEDWIRE, domestic |
 | Card spend | daily, weekday-heavy | many small | CARD (T+2) |
-| Sweeps | nightly | balance to zero/target | BOOK_TRANSFER |
+| IC funding / repatriation | monthly / quarterly schedule | round | BOOK_TRANSFER, SWIFT |
+| IC top-up (ledger) | 07:00 local, when projected balance falls below buffer | rounded up | BOOK_TRANSFER, SWIFT |
+| IC concentration (ledger) | weekly, surplus above 3× target | rounded down | BOOK_TRANSFER, SWIFT |
+| ZBA sweeps (ledger) | nightly at entity end-of-day | balance to zero | internal (fact_sweep) |
 
-Seasonality: month- and quarter-end spikes, Monday peaks, Chinese New Year dip for CN,
-per-country holidays from `dim_calendar`, and `annual_growth` as the trend.
+Seasonality comes from month- and quarter-end spikes, Tue/Thu payment runs, the Chinese New Year
+dip for CN, per-country holidays and 8% annual growth.
+
+## Ledger rules (v2)
+
+Events are replayed strictly in time order (`engine.EventLoop`). Known events are pre-sorted
+arrays, and events created during the run (top-ups) go on a heap.
+
+1. **Debits** happen at execution: when routed (cross-border) or at settlement (domestic).
+   A debit that would breach a non-pooled account's overdraft limit is rejected with AM04.
+2. **Funding** runs at 07:00 local on business days. Projected balance = balance − scheduled
+   outflows over the next 3 business days. A shortfall is covered by same-entity surplus
+   first, then by an HQ top-up. Card and urgent payments aren't scheduled, which is why a
+   few still bounce.
+3. **Concentration** runs weekly. Surplus goes back to HQ, except restricted currencies
+   (CNY, INR) and unpooled entities. That exception is the trapped cash analysis 6 finds.
+4. **End of day** has two phases. First every entity sweeps its pooled accounts to the
+   header, then every entity snapshots `fact_balance`. Splitting the phases prevents
+   same-instant ordering bugs between entities in the same timezone.
+
+## Live stream (v3)
+
+`treasury-sim stream --days 7 --speed 300` simulates `end_date + 7 days`, loads history as of
+the clock start, then advances in 5-minute ticks. Each tick it upserts only what changed:
+new payments, status changes, events, invoices, balances, sweeps, statement lines, hedges
+and FX. It also writes Parquet micro-batches (payments with DQ defects) and can POST
+camt.054-style notifications to `--webhook`.
+
+## Outputs
+
+| Layer | Where | Contents |
+|---|---|---|
+| Warehouse | `data/warehouse/treasury.sqlite` | star schema, clean |
+| Raw landing | `data/landing/{payments,invoices,payment_events,bank_statements}/` | monthly Parquet. Payments contain DQ defects |
+| Stream batches | `data/landing/stream/` | per-tick Parquet |
+| Truth | `data/truth/` | `payment_invoice`, `payment_flow`, `label_anomaly`, `label_dq`, `statement_payment` |
+| ISO 20022 | `data/iso20022/` | camt.053 XML via `treasury-sim export-camt053` |

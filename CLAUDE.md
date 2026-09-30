@@ -5,8 +5,10 @@ Treasury payments analytics portfolio project. Source lesson plan is in Notion:
 
 ## Commands
 - Setup: `python3 -m venv .venv && .venv/bin/pip install -e ".[dev,api]"`
-- Full data build: `.venv/bin/treasury-sim backfill` (~1 min). Dimensions/FX only: `treasury-sim build-world`
-- Tests: `.venv/bin/pytest` (add `-m "not contract"` to skip the ~30s full-size contract checks) · Lint: `.venv/bin/ruff check src tests`
+- Full data build: `.venv/bin/treasury-sim backfill` (~2 min). Dimensions/FX only: `treasury-sim build-world`
+- Live mode: `.venv/bin/treasury-sim stream --days 7 --speed 300` (`--speed 0` = no pacing, `--webhook URL`)
+- camt.053: `.venv/bin/treasury-sim export-camt053 --account A001 --date 2026-09-15`
+- Tests: `.venv/bin/pytest` (add `-m "not contract"` to skip the ~1 min full-size contract checks) · Lint: `.venv/bin/ruff check src tests`
 - The warehouse is rebuilt from scratch (tables dropped and recreated) on every build.
 
 ## Rules
@@ -19,3 +21,6 @@ Treasury payments analytics portfolio project. Source lesson plan is in Notion:
 - `docs/dataset-design-review.md` maps each analysis to the fields it needs. Keep it in sync with the schema.
 - `tests/test_analysis_contracts.py` checks that each analysis's planted pattern exists. When tuning the simulator, keep these passing rather than loosening them.
 - Intercompany payments have two legs (OUT and IN) that share `end_to_end_id`. Group totals must filter `is_intercompany`.
+- The lifecycle computes full outcomes. Anything time-dependent (pending status, what's visible) belongs in `asof.py`, never in the engines. That is what keeps backfill and stream identical.
+- Internal simulation columns start with `_` and must never reach the warehouse (`asof.public`, snapshot drops them).
+- Ledger postings are rounded to cents. Same-timestamp ordering is set by `ledger.balances.PRIORITY` (sweeps before snapshots).

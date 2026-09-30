@@ -23,6 +23,7 @@ from treasury.simulator import asof
 from treasury.simulator.backfill import Simulation, backfill_cut, run_simulation, snapshot, write_truth, write_warehouse
 from treasury.simulator.clock import SimClock
 from treasury.simulator.config import SimulationConfig
+from treasury.simulator.inject import data_quality
 from treasury.simulator.sinks.warehouse import get_engine, upsert
 from treasury.simulator.sinks.webhook import post_notifications
 
@@ -51,7 +52,6 @@ class Streamer:
         order = np.argsort(ts[ok], kind="stable")
         self.change_ts, self.change_row = ts[ok][order], rows[ok][order]
         self.ev_ts = sim.events["event_ts"].to_numpy()
-        self.alloc_by_payment = sim.allocation.set_index("payment_id")["invoice_id"]
         self.inv = sim.invoices.assign(issue_date_id=_date_id(sim.invoices["issue_date"]),
                                        due_date_id=_date_id(sim.invoices["due_date"]))
         self.seen_cp: set[str] = set()
@@ -82,7 +82,7 @@ class Streamer:
             out.tables["dim_counterparty"] = cps
 
         prev_day, now_day = _day_id(prev), _day_id(now)
-        touched = set(self.alloc_by_payment.reindex(p["payment_id"]).dropna())
+        touched = set(sim.allocation.loc[sim.allocation["payment_id"].isin(p["payment_id"]), "invoice_id"])
         inv = self.inv[((self.inv["issue_date_id"] > prev_day) & (self.inv["issue_date_id"] <= now_day))
                        | self.inv["invoice_id"].isin(touched)]
         if len(inv):
@@ -101,6 +101,12 @@ class Streamer:
             columns="_eod_ts").reset_index(drop=True)
         s = sim.sweeps
         out.tables["fact_sweep"] = s[(s["sweep_ts"] > prev) & (s["sweep_ts"] <= now)].reset_index(drop=True)
+        lines = sim.statement_lines
+        out.tables["fact_statement_line"] = lines[(lines["_posting_ts"] > prev) & (lines["_posting_ts"] <= now)
+                                                  ].drop(columns="_posting_ts").reset_index(drop=True)
+        h = sim.hedges
+        out.tables["fact_fx_hedge"] = h[(h["_trade_date"] > prev) & (h["_trade_date"] <= now)].drop(
+            columns="_trade_date").reset_index(drop=True)
         fx = sim.static["fact_fx_rate"]
         fx_prev, fx_now = _day_id(prev - pd.Timedelta(seconds=1)), _day_id(now - pd.Timedelta(seconds=1))
         out.tables["fact_fx_rate"] = fx[(fx["date_id"] > fx_prev) & (fx["date_id"] <= fx_now)].reset_index(drop=True)
@@ -110,7 +116,8 @@ class Streamer:
 UPSERT_ORDER = [("dim_counterparty", ["counterparty_id"]), ("fact_fx_rate", ["date_id", "currency_code"]),
                 ("fact_invoice", ["invoice_id"]), ("fact_payment", ["payment_id"]),
                 ("fact_payment_event", ["event_id"]), ("fact_balance", ["date_id", "account_id"]),
-                ("fact_sweep", ["sweep_id"])]
+                ("fact_sweep", ["sweep_id"]), ("fact_statement_line", ["line_id"]),
+                ("fact_fx_hedge", ["hedge_id"])]
 
 
 def run_stream(cfg: SimulationConfig, days: int | None = None, speed: float = 300.0,
@@ -139,7 +146,7 @@ def run_stream(cfg: SimulationConfig, days: int | None = None, speed: float = 30
                     if df is not None and len(df):
                         upsert(conn, table, df, keys)
             if landing:
-                _write_micro_batch(stream_dir, res)
+                _write_micro_batch(cfg, stream_dir, res)
             if webhook:
                 post_notifications(webhook, res.tables["fact_payment_event"], res.tables["fact_payment"], log)
             log(f"[{now:%Y-%m-%d %H:%M} UTC] "
@@ -149,13 +156,15 @@ def run_stream(cfg: SimulationConfig, days: int | None = None, speed: float = 30
     return sim
 
 
-def _write_micro_batch(root: Path, res: TickResult) -> None:
+def _write_micro_batch(cfg: SimulationConfig, root: Path, res: TickResult) -> None:
     stamp = res.now.strftime("%Y%m%dT%H%M%S")
     for table in ("fact_payment", "fact_payment_event"):
         df = res.tables.get(table)
         if df is not None and len(df):
             out = root / table.removeprefix("fact_")
             out.mkdir(parents=True, exist_ok=True)
+            if table == "fact_payment":
+                df = data_quality.apply(cfg, df)
             df.to_parquet(out / f"{stamp}.parquet", index=False)
 
 

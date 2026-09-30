@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS fact_payment (
     submitted_ts      TIMESTAMP,                     -- [+]
     settled_ts        TIMESTAMP,
     value_date_id     INTEGER REFERENCES dim_date(date_id),  -- [+]
-    status            TEXT NOT NULL CHECK (status IN ('pending','completed','rejected','returned','delayed')),  -- see lifecycle/simple.py
+    status            TEXT NOT NULL CHECK (status IN ('pending','completed','rejected','returned','delayed')),  -- see lifecycle/timing.py and asof.py
     failure_reason    TEXT REFERENCES dim_failure_reason(reason_code),
     is_stp            BOOLEAN NOT NULL,              -- [+] no manual touch end-to-end (analysis 3)
     repair_count      INTEGER NOT NULL DEFAULT 0,    -- [+] manual repairs (analysis 3)
@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS fact_statement_line (
     credit_debit      TEXT NOT NULL CHECK (credit_debit IN ('CRDT','DBIT')),
     amount            NUMERIC NOT NULL,
     currency_code     TEXT NOT NULL REFERENCES dim_currency(currency_code),
+    bank_tx_code      TEXT NOT NULL,  -- RCDT received / ICDT issued / CHRG charges / RTRN return / CARD / INTC / SWEEP
     bank_reference    TEXT NOT NULL,
     remittance_info   TEXT,           -- clean / truncated / typo'd / missing
     counterparty_name TEXT
@@ -108,10 +109,11 @@ CREATE TABLE IF NOT EXISTS fact_fx_hedge (           -- [+] optional (analysis 7
     entity_id       TEXT NOT NULL REFERENCES dim_entity(entity_id),
     trade_date_id   INTEGER NOT NULL REFERENCES dim_date(date_id),
     maturity_date_id INTEGER NOT NULL REFERENCES dim_date(date_id),
-    buy_currency    TEXT NOT NULL,
-    sell_currency   TEXT NOT NULL,
-    notional        NUMERIC NOT NULL,   -- in buy_currency
-    forward_rate    NUMERIC NOT NULL
+    buy_currency    TEXT NOT NULL REFERENCES dim_currency(currency_code),
+    sell_currency   TEXT NOT NULL REFERENCES dim_currency(currency_code),
+    buy_amount      NUMERIC NOT NULL,
+    sell_amount     NUMERIC NOT NULL,
+    forward_rate    NUMERIC NOT NULL    -- functional-currency units per 1 unit of the foreign currency
 );
 
 CREATE INDEX IF NOT EXISTS ix_payment_initiated ON fact_payment(initiated_ts);

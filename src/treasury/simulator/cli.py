@@ -3,15 +3,20 @@
   treasury-sim build-world   # dimensions, calendar and FX fixings only
   treasury-sim backfill      # full history: world + invoices + payments (v1)
   treasury-sim stream        # live simulated clock continuing after the backfill (v3)
+  treasury-sim export-camt053 --account A001 --date 2026-09-15   # ISO 20022 statement XML (v4)
 """
 
 from __future__ import annotations
 
 import argparse
 import time
+from datetime import date
+from pathlib import Path
 
 from treasury.simulator.backfill import build_static, run_backfill, write_warehouse
 from treasury.simulator.config import load_config
+from treasury.simulator.sinks.iso20022 import export_camt053
+from treasury.simulator.sinks.warehouse import get_engine
 from treasury.simulator.stream import run_stream
 
 
@@ -38,12 +43,20 @@ def main(argv: list[str] | None = None) -> None:
     st.add_argument("--max-ticks", type=int, help="stop after this many ticks")
     st.add_argument("--webhook", help="POST camt.054-style notifications to this URL")
     st.add_argument("--no-landing", action="store_true", help="skip Parquet micro-batches")
+    ex = sub.add_parser("export-camt053", help="write an ISO 20022 camt.053 statement for one account and day")
+    ex.add_argument("--account", required=True)
+    ex.add_argument("--date", required=True, type=date.fromisoformat)
+    ex.add_argument("--out", type=Path, help="default: data/iso20022/camt053_<account>_<date>.xml")
     args = parser.parse_args(argv)
 
     if args.cmd == "build-world":
         build_world_cmd(args.config)
     elif args.cmd == "backfill":
         run_backfill(load_config(args.config))
+    elif args.cmd == "export-camt053":
+        cfg = load_config(args.config)
+        out = args.out or Path("data/iso20022") / f"camt053_{args.account}_{args.date:%Y%m%d}.xml"
+        print(export_camt053(get_engine(cfg.output.warehouse_url), args.account, args.date, out))
     elif args.cmd == "stream":
         run_stream(load_config(args.config), days=args.days, speed=args.speed, max_ticks=args.max_ticks,
                    webhook=args.webhook, landing=not args.no_landing)

@@ -61,7 +61,7 @@ Measured on the full default backfill (seed 42, 24 months). `tests/test_analysis
 
 | # | Check | Result |
 |---|---|---|
-| – | Volume | 834k payments (about 1,500 per business day plus about 8% annual growth), 576k invoices |
+| – | Volume | 834k payments at v1 (about 850k after v4 adds anomalies and ledger transfers), 576k invoices |
 | – | Integrity | 0 time-order violations, 0 foreign-key violations, and the same seed produces identical data |
 | 1 | Top cross-border corridor | SG→CN (7% of cross-border value). Domestic trade dominates overall, as in real groups. |
 | 2 | Slow corridor SG→VN | about 2,300 payments. P90 is well above the median corridor. |
@@ -79,6 +79,30 @@ Measured on the full default backfill (seed 42, 24 months). `tests/test_analysis
 - **57% of payments were cross-border**, because counterparties had no home-country bias. There is now a domestic preference, so cross-border is about 28%, which is realistic.
 - **Cross-border P50 was 16h.** Per-hop times were far slower than gpi reality. Hops now take minutes, and delay comes from time zones, cut-offs and holds.
 - **7% of invoices were marked written off**, because warm-up invoices were judged against payments that had already been filtered out. Only AR can now be written off, and payables stay owed.
+
+## v2–v4 verification results
+
+`tests/test_analysis_contracts.py` enforces these, and all 9 analyses (plus a hedge-book check) pass on the full build.
+
+| Version | Check | Result |
+|---|---|---|
+| v2 | Ledger invariant | opening + postings = closing for every account, to the cent |
+| v2 | Pooling | pooled accounts close at 0 every night. HQ facility use returns to about 0 through weekly concentration. |
+| v2 | Analysis 6 | trapped CNY (Shanghai, Shenzhen) and INR (India) cash builds up while Germany is overdrawn about 96% of days |
+| v2 | AM04 | about 180 insufficient-funds rejections, all from real balances, mostly on unscheduled payments |
+| v2 | Event trail | 3.5M events, strictly ordered per payment, and SETTLED always equals `settled_ts` |
+| v3 | Stream = snapshot | streaming tick by tick leaves the warehouse identical to a snapshot at the same time |
+| v4 | Analysis 8 | full-reference match on statement lines: virtual-account payers 100%, free-text payers about 55%. About 5k part-paid invoices and about 3k multi-invoice payments. |
+| v4 | Analysis 9 | 7 anomaly types, 250–8,400 labels each, under 3% of payments |
+| v4 | Statements | the sum of statement lines equals the ledger movement per account. camt.053 OPBD + entries = CLBD. |
+| v4 | DQ | raw files differ from the warehouse by exactly the labelled defects, and the warehouse is clean |
+
+### What the checks caught while building v2–v4
+
+- **Cash piled up in the wrong places.** Collections landed in collection accounts and payments drained disbursement accounts, so HQ funded every shortfall (−4.4bn). Fixed with same-entity funding first and weekly concentration back to HQ.
+- **An end-of-day ordering bug.** Two SG entities share an EOD instant, so HQ sometimes snapshotted before SG Ops' sweep into it. Fixed by splitting EOD into a sweep phase and a snapshot phase.
+- **Statements were 3.40 off the ledger** from sub-cent rounding over 2 years. The ledger now books in cents, as banks do.
+- **camt.053 namespace.** Only the root element was namespaced, so the XML wasn't valid camt.053. Every element is now namespaced, and the test parses the XML with the namespace.
 
 ## Volume sanity check
 
