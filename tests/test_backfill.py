@@ -1,12 +1,16 @@
-"""Integrity of a small backfill: determinism, lifecycle invariants, warehouse load."""
+"""Integrity of a small simulation: determinism, lifecycle, ledger and as-of invariants."""
 
 import sqlite3
 
+import numpy as np
 import pandas as pd
 import pytest
 
-from treasury.simulator.backfill import run_backfill, simulate
+from treasury.simulator.backfill import backfill_cut, run_backfill, run_simulation, simulate, snapshot
 from treasury.simulator.config import SimulationConfig
+
+LIFECYCLE_ORDER = ["CREATED", "APPROVED", "REPAIRED", "SUBMITTED", "HELD", "SCREENED", "ROUTED", "IN_FLIGHT",
+                   "SETTLED", "REJECTED", "RETURNED"]
 
 
 @pytest.fixture(scope="module")
@@ -21,14 +25,19 @@ def small_cfg(cfg, tmp_path_factory) -> SimulationConfig:
 
 
 @pytest.fixture(scope="module")
+def sim(small_cfg):
+    return run_simulation(small_cfg)
+
+
+@pytest.fixture(scope="module")
 def ds(small_cfg):
     return run_backfill(small_cfg, log=lambda *_: None)
 
 
 def test_backfill_is_deterministic(small_cfg, ds):
     again = simulate(small_cfg)
-    pd.testing.assert_frame_equal(ds.tables["fact_payment"], again.tables["fact_payment"])
-    pd.testing.assert_frame_equal(ds.tables["fact_invoice"], again.tables["fact_invoice"])
+    for t in ["fact_payment", "fact_invoice", "fact_payment_event", "fact_balance", "fact_sweep"]:
+        pd.testing.assert_frame_equal(ds.tables[t], again.tables[t])
 
 
 def test_lifecycle_invariants(small_cfg, ds):
@@ -38,15 +47,57 @@ def test_lifecycle_invariants(small_cfg, ds):
     assert (p["submitted_ts"] >= p["initiated_ts"]).all()
     settled = p[p["settled_ts"].notna()]
     assert (settled["settled_ts"] > settled["submitted_ts"]).all()
-    assert p["initiated_ts"].min() >= pd.Timestamp(small_cfg.start_date) - pd.Timedelta(days=1)
-    # Unsettled payments have no settlement data; failed ones always have a reason.
+    assert (settled["settled_ts"] <= backfill_cut(small_cfg)).all()
     unsettled = p["status"].isin(["rejected", "pending"])
     assert p.loc[unsettled, ["settled_ts", "value_date_id", "amount_received"]].isna().all().all()
     assert p.loc[p["status"].isin(["rejected", "returned"]), "failure_reason"].notna().all()
     assert p.loc[~p["status"].isin(["rejected", "returned"]), "failure_reason"].isna().all()
-    # Cross-border payments carry gpi/charges fields; domestic ones don't.
     xb = p["uetr"].notna()
     assert p.loc[xb, "charge_bearer"].notna().all() and p.loc[~xb, "charge_bearer"].isna().all()
+
+
+def test_event_trail_is_ordered_and_matches_payment(ds):
+    p = ds.tables["fact_payment"].set_index("payment_id")
+    ev = ds.tables["fact_payment_event"]
+    assert ev["event_id"].is_unique and ev["payment_id"].isin(p.index).all()
+    rank = ev["status"].map({s: i for i, s in enumerate(LIFECYCLE_ORDER)})
+    ordered = ev.assign(rank=rank).sort_values(["payment_id", "event_ts", "rank", "hop_seq"])
+    assert (ordered.groupby("payment_id")["rank"].apply(lambda r: r.is_monotonic_increasing)).all()
+    first = ev.groupby("payment_id")["status"].first()
+    assert (first == "CREATED").all()
+    settled = ev[ev["status"] == "SETTLED"].set_index("payment_id")["event_ts"]
+    assert (settled == p.loc[settled.index, "settled_ts"]).all()
+    assert ev.loc[ev["status"].isin(["REJECTED", "RETURNED"]), "reason_code"].notna().all()
+
+
+def test_ledger_balances_reconcile(sim):
+    last = sim.balances.sort_values("_eod_ts").groupby("account_id").tail(1).set_index("account_id")
+    post = sim.postings
+    in_window = post["posting_ts"].to_numpy() <= last["_eod_ts"].reindex(post["account_id"]).to_numpy()
+    moved = post[in_window].groupby("account_id")["delta"].sum()
+    closing = sim.opening + moved.reindex(sim.opening.index).fillna(0)
+    assert np.allclose(closing, last["closing_balance"].reindex(sim.opening.index), atol=0.01)
+    pooled = sim.world.dim_account.loc[sim.world.dim_account["is_pooled"], "account_id"]
+    assert (sim.balances.loc[sim.balances["account_id"].isin(pooled), "closing_balance"].abs() < 0.01).all()
+
+
+def test_insufficient_funds_come_from_the_ledger(sim):
+    p = sim.payments
+    am04 = p[p["failure_reason"] == "AM04"]
+    assert (am04["direction"] == "OUT").all() and am04["settled_ts"].isna().all()
+    # A bounced intercompany payment never credits the receiving entity.
+    assert not p["_mirror_of"].isin(am04["payment_id"]).any()
+
+
+def test_snapshot_hides_the_future(small_cfg, sim):
+    t = pd.Timestamp(small_cfg.start_date) + pd.Timedelta(days=40, hours=13)
+    ds = snapshot(sim, t)
+    p = ds.tables["fact_payment"]
+    assert (p["initiated_ts"] <= t).all()
+    assert (p["settled_ts"].dropna() <= t).all()
+    assert (p["status"] == "pending").any()
+    assert (ds.tables["fact_payment_event"]["event_ts"] <= t).all()
+    assert (ds.tables["fact_sweep"]["sweep_ts"] <= t).all()
 
 
 def test_intercompany_legs_mirror(ds):
@@ -67,9 +118,8 @@ def test_outputs_written(small_cfg, ds):
     assert list((small_cfg.output.landing_dir / "payments").glob("*.parquet"))
     assert (small_cfg.output.truth_dir / "payment_invoice.parquet").exists()
     con = sqlite3.connect(small_cfg.output.warehouse_url.removeprefix("sqlite:///"))
-    n = con.execute("SELECT COUNT(*) FROM fact_payment").fetchone()[0]
-    assert n == len(ds.tables["fact_payment"])
+    for t in ["fact_payment", "fact_payment_event", "fact_balance", "fact_sweep"]:
+        assert con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] == len(ds.tables[t])
     assert con.execute("PRAGMA foreign_key_check").fetchall() == []
-    # Truth never reaches the warehouse.
     tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert not any(t.startswith("label_") or t.startswith("truth") for t in tables)

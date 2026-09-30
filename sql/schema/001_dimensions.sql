@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS dim_entity (
     is_in_house_bank    BOOLEAN NOT NULL,                                      -- [+]
     size                NUMERIC NOT NULL,                                      -- [+] relative volume weight
     primary_channel     TEXT NOT NULL,                                         -- [+] API / H2H_FILE / PORTAL / LEGACY_FILE
+    net_bias            NUMERIC NOT NULL,                                      -- [+] receipts vs payments tilt (simulation input)
     timezone            TEXT NOT NULL                                          -- [+]
 );
 

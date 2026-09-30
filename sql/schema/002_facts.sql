@@ -85,7 +85,8 @@ CREATE TABLE IF NOT EXISTS fact_sweep (              -- [+] pooling transfers (a
     to_account_id     TEXT NOT NULL REFERENCES dim_account(account_id),
     amount            NUMERIC NOT NULL,
     currency_code     TEXT NOT NULL REFERENCES dim_currency(currency_code),
-    sweep_ts          TIMESTAMP NOT NULL
+    sweep_ts          TIMESTAMP NOT NULL,
+    sweep_type        TEXT NOT NULL CHECK (sweep_type IN ('zba','internal'))  -- nightly zero-balancing / same-entity funding
 );
 
 -- [+] The bank's view (camt.053-like), deliberately separate from fact_payment (analysis 8).

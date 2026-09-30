@@ -53,13 +53,14 @@ banks:
 # 11 entities (blueprint: 10-15). SG HQ is the in-house bank and pool header.
 # size scales each entity's share of volume; primary_channel is how it submits payments
 # (the China entities still use legacy files -> lower STP, analysis 3).
+# net_bias tilts receipts vs payments: India accumulates idle cash, Germany drains into overdraft (analysis 6).
 entities:
   - { entity_id: E01, name: Group Treasury HQ,  country: SG, legal_type: HoldCo,  functional_ccy: SGD, is_in_house_bank: true, size: 0.3, primary_channel: API }
   - { entity_id: E02, name: SG Operations,      country: SG, legal_type: OpCo,    functional_ccy: SGD, is_in_house_bank: false, size: 1.4, primary_channel: API }
   - { entity_id: E03, name: Shanghai Mfg,       country: CN, legal_type: WFOE,    functional_ccy: CNY, is_in_house_bank: false, size: 1.6, primary_channel: LEGACY_FILE }
   - { entity_id: E04, name: Shenzhen Sourcing,  country: CN, legal_type: WFOE,    functional_ccy: CNY, is_in_house_bank: false, size: 1.2, primary_channel: LEGACY_FILE }
-  - { entity_id: E05, name: India Services,     country: IN, legal_type: PvtLtd,  functional_ccy: INR, is_in_house_bank: false, size: 0.8, primary_channel: H2H_FILE }
-  - { entity_id: E06, name: Germany GmbH,       country: DE, legal_type: GmbH,    functional_ccy: EUR, is_in_house_bank: false, size: 1.5, primary_channel: H2H_FILE }
+  - { entity_id: E05, name: India Services,     country: IN, legal_type: PvtLtd,  functional_ccy: INR, is_in_house_bank: false, size: 0.8, primary_channel: H2H_FILE, net_bias: 0.25 }
+  - { entity_id: E06, name: Germany GmbH,       country: DE, legal_type: GmbH,    functional_ccy: EUR, is_in_house_bank: false, size: 1.5, primary_channel: H2H_FILE, net_bias: -0.2 }
   - { entity_id: E07, name: Germany Sales Office, country: DE, legal_type: Branch, functional_ccy: EUR, is_in_house_bank: false, size: 0.5, primary_channel: PORTAL }
   - { entity_id: E08, name: Netherlands BV,     country: NL, legal_type: BV,      functional_ccy: EUR, is_in_house_bank: false, size: 0.9, primary_channel: API }
   - { entity_id: E09, name: UK Ltd,             country: GB, legal_type: Ltd,     functional_ccy: GBP, is_in_house_bank: false, size: 0.9, primary_channel: H2H_FILE }
@@ -71,6 +72,7 @@ accounts:
   pooled_share: 0.6             # rest are deliberately outside the pool (analysis 6)
   force_unpooled_entities: [E05] # India (restricted INR) idle cash story
   overdraft_entities: [E06]      # Germany runs an overdraft while others hold idle cash
+  overdraft_limit: 2000000       # in the account currency, on overdraft entities' functional-currency accounts
   interest:                      # annual rates, used to value the pooling benefit (analysis 6)
     credit_rate: { SGD: 0.010, USD: 0.020, EUR: 0.005, GBP: 0.015, CNY: 0.003, INR: 0.030 }
     debit_rate:  { SGD: 0.055, USD: 0.075, EUR: 0.060, GBP: 0.070, CNY: 0.050, INR: 0.105 }
@@ -90,6 +92,22 @@ volumes:
     ap_payment: 0.30
     card_spend: 0.35
     urgent_supplier: 0.03
+
+ledger:
+  opening_days_of_outflow: 5        # opening balance = target + N days of the account's average outflow
+  funding_lookahead_business_days: 3 # IC top-up rule looks at scheduled (ERP-known) outflows this far ahead
+  funding_buffer_share: 0.25        # top up when projected balance < 25% of target
+  overdraft_fund_trigger: 0.9       # overdraft accounts are only topped up past 90% of their limit...
+  overdraft_fund_to: 0.3            # ...and only back to 30% drawn, so they keep running an overdraft
+  hq_facility_sgd: 300000000        # group revolving facility behind the in-house bank's header accounts
+  topup_rounding_sgd: 100000
+  concentration_weekday: 2          # Wednesdays: surplus above trigger x target goes back to HQ...
+  concentration_trigger: 3.0
+  concentration_keep: 1.5           # ...leaving 1.5 x target. Restricted currencies and unpooled entities are exempt.
+
+stream:
+  tick_sim_seconds: 300             # each tick advances the simulated clock 5 minutes
+  default_days: 7                   # how far past end_date a live run simulates
 
 rails:
   FAST:          { is_instant: true,  is_batch: false, latency_s: [2, 20],      fail_rate: 0.004, max_amount_sgd: 200000 }
@@ -120,7 +138,7 @@ anomalies:                          # business anomalies: valid money movements,
   round_amount_rate: 0.003
   burst_rate: 0.0005
   high_risk_country_share: 0.01
-  new_beneficiary_high_value_rate: 0.001
+  new_beneficiary_high_value_rate: 0.0003
   off_hours_rate: 0.002
 
 data_quality:                       # dirty-data defects: raw layer only, never posted to the ledger

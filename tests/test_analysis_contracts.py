@@ -84,8 +84,20 @@ def test_05_forecast_has_history_trend_and_weekly_pattern(cfg, pay):
     assert q.iloc[-4:].mean() > q.iloc[:4].mean()                 # growth trend
 
 
-def test_06_idle_cash_coexists_with_overdraft():
-    pytest.skip("needs fact_balance (v2 ledger)")
+def test_06_idle_cash_coexists_with_overdraft(ds):
+    bal = ds.tables["fact_balance"]
+    acc = ds.tables["dim_account"].set_index("account_id")
+    bal = bal.assign(entity=acc.loc[bal["account_id"], "entity_id"].to_numpy(),
+                     target_sgd=acc.loc[bal["account_id"], "target_balance"].to_numpy()
+                     * bal["closing_balance_sgd"] / bal["closing_balance"].where(bal["closing_balance"] != 0))
+    idle = bal[bal["closing_balance_sgd"] > 2 * bal["target_sgd"]].groupby("date_id")["closing_balance_sgd"].sum()
+    overdrawn = bal[bal["closing_balance"] < 0].groupby("date_id")["closing_balance_sgd"].sum()
+    both = idle.index.intersection(overdrawn.index)
+    assert len(both) >= 0.5 * bal["date_id"].nunique()     # the pooling opportunity exists most days
+    assert (idle.loc[both] > -overdrawn.loc[both]).mean() > 0.5  # idle cash could cover the overdraft
+    # Pooled accounts are swept to zero every night.
+    pooled = acc.index[acc["is_pooled"]]
+    assert (bal.loc[bal["account_id"].isin(pooled), "closing_balance"].abs() < 0.01).all()
 
 
 def test_07_fx_exposure_long_eur_short_cny(ds, pay):

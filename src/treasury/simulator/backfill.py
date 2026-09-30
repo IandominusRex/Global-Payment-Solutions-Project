@@ -1,34 +1,40 @@
-"""Backfill orchestration: world -> events -> lifecycle -> landing / truth / warehouse."""
+"""Orchestration: world -> events -> lifecycle -> ledger -> event log, then as-of snapshots.
+
+run_simulation() computes the full future up to a horizon. snapshot(sim, t) is what the
+warehouse shows at simulated time t. The backfill is the snapshot at the end of the last
+day; the live stream (stream.py) takes successive snapshots as its clock moves.
+"""
 
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from datetime import date, timedelta
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from sqlalchemy import text
 
+from treasury.simulator import asof
 from treasury.simulator.business import events
 from treasury.simulator.business.events import Fx
 from treasury.simulator.config import SimulationConfig
-from treasury.simulator.lifecycle import simple
+from treasury.simulator.ledger import balances as ledger
+from treasury.simulator.lifecycle import state_machine, timing
 from treasury.simulator.market.fx import build_fx_rates
 from treasury.simulator.sinks.warehouse import create_schema, get_engine, replace_rows
 from treasury.simulator.world.builder import World, build_world
 from treasury.simulator.world.calendar import BusinessCalendar, build_dim_calendar, build_dim_date
 
-# Parents before children, so foreign keys are satisfied on insert (reverse for delete).
+# Parents before children, so foreign keys are satisfied on insert (reverse for drop).
 DIMENSIONS = [
     "dim_date", "dim_country", "dim_calendar", "dim_currency", "dim_bank", "dim_entity", "dim_account",
     "dim_counterparty", "dim_payment_type", "dim_failure_reason", "dim_purpose_code",
 ]
-FACTS = ["fact_fx_rate", "fact_invoice", "fact_payment"]
-ALL_TABLES = [
-    "fact_payment_event", "fact_statement_line", "fact_sweep", "fact_balance", "fact_fx_hedge",
-    *reversed(FACTS), *reversed(DIMENSIONS),
-]
+FACTS = ["fact_fx_rate", "fact_invoice", "fact_payment", "fact_payment_event", "fact_balance", "fact_sweep",
+         "fact_statement_line", "fact_fx_hedge"]
+ALL_TABLES = [*reversed(FACTS), *reversed(DIMENSIONS)]
 
 
 @dataclass
@@ -37,68 +43,126 @@ class Dataset:
     truth: dict[str, pd.DataFrame]    # hidden ground truth, never loaded
 
 
-def build_static(cfg: SimulationConfig) -> tuple[World, dict[str, pd.DataFrame], BusinessCalendar, Fx]:
+@dataclass
+class Simulation:
+    """The full simulated future up to `horizon_end` (not an as-of view)."""
+    cfg: SimulationConfig
+    world: World
+    static: dict[str, pd.DataFrame]
+    fx: Fx
+    invoices: pd.DataFrame
+    allocation: pd.DataFrame      # payment_id, invoice_id, allocated_amount
+    payments: pd.DataFrame        # final outcomes + internal "_" columns
+    events: pd.DataFrame
+    balances: pd.DataFrame        # includes internal _eod_ts
+    sweeps: pd.DataFrame
+    postings: pd.DataFrame
+    opening: pd.Series
+    horizon_end: date
+
+
+def build_static(cfg: SimulationConfig, horizon_end: date | None = None
+                 ) -> tuple[World, dict[str, pd.DataFrame], BusinessCalendar, Fx]:
+    horizon_end = horizon_end or cfg.end_date
     world = build_world(cfg)
-    dim_date = build_dim_date(cfg.data_start, cfg.calendar_end)
+    dim_date = build_dim_date(cfg.data_start, horizon_end + timedelta(days=cfg.forward_days))
     dim_calendar = build_dim_calendar(dim_date, list(cfg.countries))
-    fx = build_fx_rates(cfg, cfg.data_start, cfg.end_date)
+    fx = build_fx_rates(cfg, cfg.data_start, horizon_end + timedelta(days=3))
     tables = {"dim_date": dim_date, "dim_calendar": dim_calendar, **world.tables(), "fact_fx_rate": fx}
     return world, tables, BusinessCalendar(dim_date, dim_calendar), Fx.from_frame(fx)
 
 
-def simulate(cfg: SimulationConfig) -> Dataset:
-    world, tables, cal, fx = build_static(cfg)
-    invoices, intents = events.generate(cfg, world, cal, fx)
-    payments, allocation = simple.run(cfg, world, cal, fx, intents)
+def run_simulation(cfg: SimulationConfig, horizon_end: date | None = None) -> Simulation:
+    horizon_end = horizon_end or cfg.end_date
+    world, static, cal, fx = build_static(cfg, horizon_end)
+    invoices, intents, alloc = events.generate(cfg, world, cal, fx, end=np.datetime64(horizon_end))
+    payments = timing.run(cfg, world, cal, fx, intents)
+    led = ledger.run(cfg, world, cal, fx, payments, np.datetime64(horizon_end) + np.timedelta64(2, "D"))
+    payments = led.payments
+    first = payments[payments["_mirror_of"].isna()].drop_duplicates("intent_id")[["intent_id", "payment_id"]]
+    allocation = alloc.merge(first, on="intent_id")[["payment_id", "invoice_id", "allocated_amount"]]
+    ev = state_machine.build_events(payments, world.dim_account)
+    return Simulation(cfg=cfg, world=world, static=static, fx=fx, invoices=invoices, allocation=allocation,
+                      payments=payments, events=ev, balances=led.balances, sweeps=led.sweeps,
+                      postings=led.postings, opening=led.opening, horizon_end=horizon_end)
 
-    tables["fact_invoice"] = _finalise_invoices(cfg, invoices, payments)
 
-    # Keep only payments inside the reporting window; the warm-up exists so receipts
-    # don't ramp up from zero on day one.
-    payments = payments[payments["intended_date"] >= np.datetime64(cfg.start_date)].reset_index(drop=True)
-    allocation = allocation[allocation["payment_id"].isin(payments["payment_id"])]
-    allocation = allocation[allocation["invoice_id"].isin(tables["fact_invoice"]["invoice_id"])]
+def snapshot(sim: Simulation, t: pd.Timestamp, balance_date_max: date | None = None) -> Dataset:
+    """Warehouse tables as they look at simulated time t (UTC).
 
-    first_seen = pd.to_datetime(payments.groupby("counterparty_id")["initiated_ts"].min()).dt.date
+    balance_date_max also includes end-of-day snapshots up to that local date even if a
+    western timezone's EOD falls a few hours after t (used by the backfill cut).
+    """
+    cfg = sim.cfg
+    start = pd.Timestamp(cfg.start_date)
+    tables = {k: v for k, v in sim.static.items() if k != "fact_fx_rate"}
+    fx = sim.static["fact_fx_rate"]
+
+    p_all = asof.payments_as_of(sim.payments, t)
+    p = p_all[p_all["intended_date"] >= start].reset_index(drop=True)
+
+    inv = sim.invoices.assign(issue_date_id=_date_id(sim.invoices["issue_date"]),
+                              due_date_id=_date_id(sim.invoices["due_date"]))
+    # Drop warm-up invoices already fully settled before the window opened.
+    early = inv[inv["issue_date_id"] < int(start.strftime("%Y%m%d"))]
+    at_start = asof.invoices_as_of(early, sim.allocation, asof.payments_as_of(sim.payments, start), start)
+    inv = inv[~inv["invoice_id"].isin(at_start.loc[at_start["status"] == "paid", "invoice_id"])]
+    inv = asof.invoices_as_of(inv, sim.allocation, p_all, t)
+
     cps = tables["dim_counterparty"].copy()
+    first_seen = pd.to_datetime(p.groupby("counterparty_id")["initiated_ts"].min()).dt.date
     cps["first_seen_date"] = cps["counterparty_id"].map(first_seen)
     tables["dim_counterparty"] = cps
 
-    tables["fact_payment"] = payments[simple.PAYMENT_COLUMNS]
+    ev = sim.events[sim.events["payment_id"].isin(p["payment_id"]) & (sim.events["event_ts"] <= t)]
+    start_id = int(start.strftime("%Y%m%d"))
+    bmax = int(balance_date_max.strftime("%Y%m%d")) if balance_date_max else 0
+    bal = sim.balances[(sim.balances["date_id"] >= start_id)
+                       & ((sim.balances["_eod_ts"] <= t) | (sim.balances["date_id"] <= bmax))]
+    sw = sim.sweeps[(sim.sweeps["date_id"] >= start_id)
+                    & ((sim.sweeps["sweep_ts"] <= t) | (sim.sweeps["date_id"] <= bmax))]
+
+    tables.update({
+        "fact_fx_rate": fx[fx["date_id"] <= int((t - pd.Timedelta(seconds=1)).strftime("%Y%m%d"))
+                           ].reset_index(drop=True),
+        "fact_invoice": inv[["invoice_id", "direction", "entity_id", "counterparty_id", "invoice_ref",
+                             "currency_code", "amount", "issue_date_id", "due_date_id", "status"]
+                            ].reset_index(drop=True),
+        "fact_payment": asof.public(p),
+        "fact_payment_event": ev.reset_index(drop=True),
+        "fact_balance": bal.drop(columns="_eod_ts").reset_index(drop=True),
+        "fact_sweep": sw.reset_index(drop=True),
+    })
     truth = {
-        "payment_invoice": allocation.reset_index(drop=True),
-        "payment_flow": payments[["payment_id", "flow", "entity_id"]],
+        "payment_invoice": sim.allocation[sim.allocation["payment_id"].isin(p["payment_id"])].reset_index(drop=True),
+        "payment_flow": p[["payment_id", "flow", "entity_id"]],
     }
     return Dataset(tables=tables, truth=truth)
 
 
-def _finalise_invoices(cfg: SimulationConfig, invoices: pd.DataFrame, payments: pd.DataFrame) -> pd.DataFrame:
-    """Invoice status from the full payment history (including the warm-up period)."""
-    good = payments[payments["status"].isin(["completed", "delayed"]) & payments["invoice_id"].notna()]
-    paid = set(good["invoice_id"])
-    inv = invoices.copy()
-    start, end = np.datetime64(cfg.start_date), np.datetime64(cfg.end_date)
-    # Drop warm-up invoices that were fully settled before the window opened.
-    paid_before = set(good.loc[good["intended_date"] < start, "invoice_id"])
-    inv = inv[(inv["issue_date"] >= start) | ~inv["invoice_id"].isin(paid_before)]
-    inv = inv[inv["issue_date"] <= end]
-    status = np.where(inv["invoice_id"].isin(paid), "paid", "open").astype(object)
-    # Only receivables get written off; unpaid payables stay owed.
-    stale = ((inv["due_date"] < end - np.timedelta64(180, "D")) & (inv["direction"] == "AR")).to_numpy() \
-        & (status == "open")
-    status[stale] = "written_off"
-    inv["status"] = status
-    inv["issue_date_id"] = inv["issue_date"].dt.strftime("%Y%m%d").astype(int)
-    inv["due_date_id"] = inv["due_date"].dt.strftime("%Y%m%d").astype(int)
-    return inv[["invoice_id", "direction", "entity_id", "counterparty_id", "invoice_ref", "currency_code",
-                "amount", "issue_date_id", "due_date_id", "status"]].reset_index(drop=True)
+def backfill_cut(cfg: SimulationConfig) -> pd.Timestamp:
+    return pd.Timestamp(cfg.end_date) + pd.Timedelta(days=1)
+
+
+def simulate(cfg: SimulationConfig) -> Dataset:
+    return snapshot(run_simulation(cfg), backfill_cut(cfg), balance_date_max=cfg.end_date)
+
+
+def _date_id(s: pd.Series) -> pd.Series:
+    return pd.to_datetime(s).dt.strftime("%Y%m%d").astype(int)
+
+
+# ---------------------------------------------------------------- sinks
+
+LANDING = {"payments": ("fact_payment", "initiated_ts"), "invoices": ("fact_invoice", "issue_date_id"),
+           "payment_events": ("fact_payment_event", "event_ts")}
 
 
 def write_landing(cfg: SimulationConfig, ds: Dataset) -> None:
     """Raw timestamped batches, one Parquet file per month, like host-to-host drops."""
     root = Path(cfg.output.landing_dir)
-    for name, ts_col, df in [("payments", "initiated_ts", ds.tables["fact_payment"]),
-                             ("invoices", "issue_date_id", ds.tables["fact_invoice"])]:
+    for name, (table, ts_col) in LANDING.items():
+        df = ds.tables[table]
         out = root / name
         out.mkdir(parents=True, exist_ok=True)
         for old in out.glob("*.parquet"):
@@ -107,6 +171,10 @@ def write_landing(cfg: SimulationConfig, ds: Dataset) -> None:
                else df[ts_col].astype(str).str[:4] + "-" + df[ts_col].astype(str).str[4:6])
         for month, part in df.groupby(key):
             part.to_parquet(out / f"{name}_{month}.parquet", index=False)
+    write_truth(cfg, ds)
+
+
+def write_truth(cfg: SimulationConfig, ds: Dataset) -> None:
     truth_dir = Path(cfg.output.truth_dir)
     truth_dir.mkdir(parents=True, exist_ok=True)
     for name, df in ds.truth.items():

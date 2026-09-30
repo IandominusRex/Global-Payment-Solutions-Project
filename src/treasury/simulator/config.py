@@ -56,6 +56,7 @@ class Entity(BaseModel):
     is_in_house_bank: bool = False
     size: float = Field(default=1.0, gt=0)
     primary_channel: Channel = "API"
+    net_bias: float = Field(default=0.0, gt=-1, lt=1)
 
 
 class InterestConfig(BaseModel):
@@ -68,6 +69,7 @@ class AccountsConfig(BaseModel):
     pooled_share: float = Field(ge=0, le=1)
     force_unpooled_entities: list[str] = []
     overdraft_entities: list[str] = []
+    overdraft_limit: float = Field(default=0.0, ge=0)
     interest: InterestConfig
 
 
@@ -103,6 +105,24 @@ class VolumesConfig(BaseModel):
     payments_per_business_day: int = Field(gt=0)
     annual_growth: float
     flow_mix: FlowMix
+
+
+class LedgerConfig(BaseModel):
+    opening_days_of_outflow: float = Field(ge=0)
+    funding_lookahead_business_days: int = Field(ge=1)
+    funding_buffer_share: float = Field(ge=0)
+    overdraft_fund_trigger: float = Field(gt=0, le=1)
+    overdraft_fund_to: float = Field(ge=0, le=1)
+    hq_facility_sgd: float = Field(ge=0)
+    topup_rounding_sgd: float = Field(gt=0)
+    concentration_weekday: int = Field(ge=0, le=6)
+    concentration_trigger: float = Field(gt=1)
+    concentration_keep: float = Field(ge=0)
+
+
+class StreamConfig(BaseModel):
+    tick_sim_seconds: int = Field(gt=0)
+    default_days: int = Field(gt=0)
 
 
 class Rail(BaseModel):
@@ -166,6 +186,8 @@ class SimulationConfig(BaseModel):
     accounts: AccountsConfig
     counterparties: CounterpartiesConfig
     volumes: VolumesConfig
+    ledger: LedgerConfig
+    stream: StreamConfig
     rails: dict[str, Rail]
     scenarios: ScenariosConfig
     anomalies: AnomaliesConfig

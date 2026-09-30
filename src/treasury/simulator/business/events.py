@@ -78,9 +78,14 @@ class Fx:
         return out
 
 
-def generate(cfg: SimulationConfig, world: World, cal: BusinessCalendar, fx: Fx) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Return (fact_invoice, payment intents) for data_start..end_date."""
-    gen = _Generator(cfg, world, cal, fx)
+def generate(cfg: SimulationConfig, world: World, cal: BusinessCalendar, fx: Fx,
+             end: np.datetime64 | None = None) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Return (invoices, payment intents, allocation) for data_start..end (default end_date).
+
+    allocation maps intent_id -> invoice_id(s) with the amount each payment settles;
+    it becomes hidden ground truth for reconciliation (analysis 8).
+    """
+    gen = _Generator(cfg, world, cal, fx, end)
     ar_inv, ar_pay = gen.ar_receipts()
     ap_inv, ap_pay = gen.ap_payments()
     invoices = pd.concat([ar_inv, ap_inv], ignore_index=True)
@@ -88,17 +93,23 @@ def generate(cfg: SimulationConfig, world: World, cal: BusinessCalendar, fx: Fx)
         [ar_pay, ap_pay, gen.card_spend(), gen.payroll(), gen.tax(), gen.intercompany()],
         ignore_index=True,
     )[INTENT_COLUMNS]
-    intents = intents[intents["intended_date"] <= np.datetime64(cfg.end_date)]
-    return invoices, intents.reset_index(drop=True)
+    intents = intents[intents["intended_date"] <= gen.end].reset_index(drop=True)
+    intents["intent_id"] = np.arange(len(intents))
+    has_inv = intents["invoice_id"].notna()
+    allocation = pd.DataFrame({"intent_id": intents.loc[has_inv, "intent_id"],
+                               "invoice_id": intents.loc[has_inv, "invoice_id"],
+                               "allocated_amount": intents.loc[has_inv, "amount"]}).reset_index(drop=True)
+    return invoices, intents, allocation
 
 
 class _Generator:
-    def __init__(self, cfg: SimulationConfig, world: World, cal: BusinessCalendar, fx: Fx):
+    def __init__(self, cfg: SimulationConfig, world: World, cal: BusinessCalendar, fx: Fx,
+                 end: np.datetime64 | None = None):
         self.cfg, self.world, self.cal, self.fx = cfg, world, cal, fx
         self.ent = world.dim_entity.set_index("entity_id")
         self.cp = world.dim_counterparty.set_index("counterparty_id")
         self.start = np.datetime64(cfg.data_start)
-        self.end = np.datetime64(cfg.end_date)
+        self.end = np.datetime64(end if end is not None else cfg.end_date, "D")
         self.origin = np.datetime64(cfg.start_date)
         # Fixed "size" per counterparty so a few customers/suppliers dominate volume.
         self.cp_size = pd.Series(stream(cfg.seed, "events.cp_size").lognormal(0, 1.0, len(self.cp)),
@@ -134,14 +145,18 @@ class _Generator:
             out |= (d >= f - pd.Timedelta(days=2)) & (d <= f + pd.Timedelta(days=10))
         return out
 
-    def _daily_counts(self, rng: np.random.Generator, share: float) -> pd.DataFrame:
-        """Poisson counts per (entity, business day) for a flow with the given volume share."""
+    def _daily_counts(self, rng: np.random.Generator, share: float, bias_sign: int = 0) -> pd.DataFrame:
+        """Poisson counts per (entity, business day) for a flow with the given volume share.
+
+        bias_sign +1 (receipts) / -1 (payments) applies each entity's net_bias.
+        """
         base = self.cfg.volumes.payments_per_business_day * share
         frames = []
         for e in self.cfg.entities:
             days = self.cal.business_days(e.country)
             days = days[(days >= self.start) & (days <= self.end)]
             lam = base * self.entity_share[e.entity_id] * self._growth(days) * self._season(e.country, days)
+            lam = lam * (1 + bias_sign * e.net_bias)
             n = rng.poisson(lam)
             frames.append(pd.DataFrame({"entity_id": e.entity_id, "day": np.repeat(days, n)}))
         return pd.concat(frames, ignore_index=True)
@@ -189,7 +204,7 @@ class _Generator:
 
     def ar_receipts(self) -> tuple[pd.DataFrame, pd.DataFrame]:
         rng = stream(self.cfg.seed, "events.ar")
-        inv = self._daily_counts(rng, self.cfg.volumes.flow_mix.ar_receipt)
+        inv = self._daily_counts(rng, self.cfg.volumes.flow_mix.ar_receipt, bias_sign=+1)
         inv["counterparty_id"] = self._pick_counterparties(rng, inv["entity_id"].to_numpy(), "customer")
         inv["currency_code"] = self._invoice_currency(inv["entity_id"].to_numpy(), inv["counterparty_id"].to_numpy(),
                                                       is_ap=False)
@@ -230,7 +245,7 @@ class _Generator:
     def ap_payments(self) -> tuple[pd.DataFrame, pd.DataFrame]:
         rng = stream(self.cfg.seed, "events.ap")
         mix = self.cfg.volumes.flow_mix
-        inv = self._daily_counts(rng, mix.ap_payment + mix.urgent_supplier)
+        inv = self._daily_counts(rng, mix.ap_payment + mix.urgent_supplier, bias_sign=-1)
         inv["is_urgent"] = rng.random(len(inv)) < mix.urgent_supplier / (mix.ap_payment + mix.urgent_supplier)
         inv["counterparty_id"] = self._pick_counterparties(rng, inv["entity_id"].to_numpy(), "supplier")
         inv["currency_code"] = self._invoice_currency(inv["entity_id"].to_numpy(), inv["counterparty_id"].to_numpy(),
@@ -288,7 +303,7 @@ class _Generator:
         })
 
     def _month_days(self, day_of_month: int) -> np.ndarray:
-        months = pd.date_range(self.cfg.data_start, self.cfg.end_date, freq="MS")
+        months = pd.date_range(self.cfg.data_start, pd.Timestamp(self.end), freq="MS")
         return np.array([(m + pd.offsets.MonthEnd(0)) if day_of_month >= 28 else m + pd.Timedelta(days=day_of_month - 1)
                          for m in months], dtype="datetime64[D]")
 

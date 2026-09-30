@@ -98,7 +98,8 @@ def _build_accounts(cfg: SimulationConfig, rng: np.random.Generator) -> pd.DataF
                 "currency_code": str(ccy),
                 "account_type": str(acc_type),
                 "overdraft_limit": 0.0,
-                "target_balance": float(np.round(rng.lognormal(12.5, 0.6), -3)),
+                "target_balance": float(np.round(rng.lognormal(14.0, 0.5) / cfg.currencies[str(ccy)].start_rate_to_sgd,
+                                                 -3)),
                 "is_pooled": False,
                 "pool_header_account_id": None,
             })
@@ -121,16 +122,22 @@ def _build_accounts(cfg: SimulationConfig, rng: np.random.Generator) -> pd.DataF
             }
             headers[ccy] = aid
 
-    eligible = (
+    # Overdraft entities keep their functional-currency accounts outside the pool, so the
+    # overdraft is visible instead of being covered by nightly sweeps.
+    od = acc["entity_id"].isin(cfg.accounts.overdraft_entities) & (
+        acc["currency_code"] == acc["entity_id"].map({e.entity_id: e.functional_ccy for e in cfg.entities}))
+    acc.loc[od, "overdraft_limit"] = cfg.accounts.overdraft_limit
+    hq = acc["entity_id"] == header_entity.entity_id
+    acc.loc[hq, "overdraft_limit"] = [np.round(cfg.ledger.hq_facility_sgd / cfg.currencies[c].start_rate_to_sgd, -3)
+                                      for c in acc.loc[hq, "currency_code"]]
+
+    eligible = ~od & (
         ~acc["entity_id"].isin(cfg.accounts.force_unpooled_entities + [header_entity.entity_id])
         & ~acc["currency_code"].map(lambda c: cfg.currencies[c].is_restricted)
     )
     pooled = eligible & (rng.random(len(acc)) < cfg.accounts.pooled_share)
     acc.loc[pooled, "is_pooled"] = True
     acc.loc[pooled, "pool_header_account_id"] = acc.loc[pooled, "currency_code"].map(headers)
-
-    od = acc["entity_id"].isin(cfg.accounts.overdraft_entities) & (acc["account_type"] == "operating")
-    acc.loc[od, "overdraft_limit"] = 2_000_000.0
 
     acc["credit_rate"] = acc["currency_code"].map(cfg.accounts.interest.credit_rate)
     acc["debit_rate"] = acc["currency_code"].map(cfg.accounts.interest.debit_rate)
