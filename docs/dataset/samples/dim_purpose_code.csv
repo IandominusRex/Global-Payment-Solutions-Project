@@ -1,0 +1,9 @@
+purpose_code,description
+SUPP,Supplier payment
+SALA,Salary payment
+TAXS,Tax payment
+INTC,Intra-company payment
+CASH,Cash management transfer
+GDDS,Purchase or sale of goods
+SCVE,Purchase or sale of services
+TREA,Treasury payment

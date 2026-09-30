@@ -24,6 +24,7 @@ from treasury.simulator.backfill import Simulation, backfill_cut, run_simulation
 from treasury.simulator.clock import SimClock
 from treasury.simulator.config import SimulationConfig
 from treasury.simulator.inject import data_quality
+from treasury.simulator.sinks.exports import refresh_exports
 from treasury.simulator.sinks.warehouse import get_engine, upsert
 from treasury.simulator.sinks.webhook import post_notifications
 
@@ -151,7 +152,7 @@ def run_stream(cfg: SimulationConfig, days: int | None = None, speed: float = 30
     stream_dir = Path(cfg.output.landing_dir) / "stream"
     clock = SimClock(start, cfg.stream.tick_sim_seconds, speed, end=end)
     try:
-        for prev, now in clock.ticks(max_ticks):
+        for i, (prev, now) in enumerate(clock.ticks(max_ticks), start=1):
             res = streamer.tick(prev, now)
             with engine.begin() as conn:
                 for table, keys in UPSERT_ORDER:
@@ -164,8 +165,12 @@ def run_stream(cfg: SimulationConfig, days: int | None = None, speed: float = 30
                 post_notifications(webhook, res.tables["fact_payment_event"], res.tables["fact_payment"], log)
             changes = ", ".join(f"{k.removeprefix('fact_')}={len(v)}" for k, v in res.tables.items() if len(v))
             log(f"[{now:%Y-%m-%d %H:%M} UTC] {changes or 'no changes'}")
+            every = cfg.stream.export_every_ticks
+            if every and i % every == 0:
+                refresh_exports(cfg, docs=False, log=log)
     except KeyboardInterrupt:
         log(f"Stopped at simulated {clock.now}")
+    refresh_exports(cfg, docs=False, log=log)  # final state, so the workbook always matches the warehouse
     return sim
 
 

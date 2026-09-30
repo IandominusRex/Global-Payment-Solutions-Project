@@ -1,0 +1,7 @@
+bank_id,name,country,bic,is_correspondent
+B01,Merlion Global Bank,SG,MGBKSGZZ,1
+B02,Rhine Commerzhaus,DE,RHCHDEZZ,1
+B03,Hudson Trust,US,HUTRUSZZ,1
+B04,Pearl River Bank,CN,PRBKCNZZ,0
+B05,Deccan Commercial,IN,DECMINZZ,0
+B06,Thames Mercantile,GB,THMEGBZZ,0

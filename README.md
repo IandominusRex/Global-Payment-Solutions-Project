@@ -1,12 +1,47 @@
 # Treasury Payments Analytics Platform
 
 A portfolio project to learn, by building, what it is like to work in a Global Payments
-Solutions environment. It simulates a multinational group's treasury (11 entities, about
-50 accounts, 6 currencies; domestic, instant and cross-border rails). From that it builds a
-star-schema warehouse, nine treasury analyses, dashboards and a bank-style FastAPI service.
+Solutions environment. It simulates the payments of a fictional multinational group, then builds
+a warehouse, nine treasury analyses, dashboards and a bank-style API on top of it.
 
 > **All data is synthetic.** Entities, banks, BICs, counterparties and names are
 > generated. No real client or employer data is used.
+
+## The dataset at a glance
+
+Picture one fictional company, **Group Treasury HQ in Singapore**, that owns ten other companies
+around the world. Every day those companies pay suppliers, get paid by customers, run payroll and
+move cash between themselves. The dataset is the record of all of that over 24 months: about
+**106,000 payments**, worth roughly **S$2.6 billion**.
+
+| Term | Plain meaning | Example from the data |
+|---|---|---|
+| **11 entities** | The separate legal companies inside the group. Each has its own bank accounts, home currency and local rules. One (the HQ) also acts as the group's *in-house bank*, lending cash to the others. | `E03` **Shanghai Mfg**, a factory in China that earns and pays in yuan (CNY), and `E06` **Germany GmbH**, which pays in euros. |
+| **About 50 accounts** (48) | Bank accounts held by those entities at fictional banks. Each has a currency, a target balance the treasury wants to keep, and sometimes an overdraft limit. Some are *pooled*: any surplus is swept to a header account every night. | `A004` is SG Operations' main SGD account at *Merlion Global Bank* (a made-up bank). |
+| **6 currencies** | SGD, USD, EUR, GBP, CNY, INR. The group reports in SGD, so every payment also carries its SGD value. CNY and INR are *restricted*: cash can't move freely in or out of China and India. | A payment of 10,739.70 GBP is stored as S$18,108.73 at that day's exchange rate. |
+| **Payment rails** | The "roads" money travels on. Which road you use decides how fast it arrives, what it costs and how often it fails. | See the three types below. |
+
+**Domestic rails** move money *within one country or region*. They are cheap and reliable, but many
+run in batches with a daily **cut-off time**: miss it and the payment waits until the next business day.
+Examples: `GIRO` (Singapore, next day), `ACH` (US), `SEPA_CT` (Europe), `BACS` (UK), `NEFT` (India), `CNAPS` (China).
+
+**Instant rails** settle in seconds, at any hour, but usually cap the amount.
+Examples: `FAST` (Singapore, up to S$200,000), `SEPA_INST` (Europe).
+
+**Cross-border rails** move money *between countries*, usually through `SWIFT`, where the payment
+hops across one or more **correspondent banks**. It is slower, each hop can take a fee, and it fails
+the most (about 3% vs under 1% for domestic). Example, from the `fact_payment` and `fact_payment_event` tables:
+
+> Payment `P00008587`: SG Operations (Singapore) pays a UK supplier £10,739.70 over SWIFT. Created
+> 01:09, approved, sent to the bank at 01:27, screened for sanctions, then three hops between banks,
+> and settled at 02:29 UTC. Every one of those steps is a row in the event table.
+
+Two more, for completeness: `CARD` (corporate card spend, settles in about 2 days) and
+`BOOK_TRANSFER` (between accounts at the same bank, instant).
+
+**Preview the data without running anything:** see the [dataset card](docs/dataset/dataset-card.md)
+(summary statistics, every column explained, one example record per table) and the
+[sample CSVs](docs/dataset/samples/), which GitHub shows as tables.
 
 ## Why this project exists
 
@@ -48,7 +83,9 @@ pip install -e ".[dev,api]"
 
 # Small profile (recommended): ~106k payments, builds in ~20s, CSV/Excel friendly
 treasury-sim --config config/simulation.small.yaml backfill
-treasury-sim --config config/simulation.small.yaml export-csv    # -> data_small/csv/*.csv
+# ...also writes data_small/exports/treasury_dataset.xlsx (one sheet per table) and csv/,
+# and refreshes docs/dataset/. Both rebuild automatically after every backfill and while streaming.
+treasury-sim --config config/simulation.small.yaml export-all    # rebuild the exports on demand
 
 # Full profile: ~850k payments, ~2 min
 treasury-sim backfill             # 24 months of history -> data/warehouse/treasury.sqlite
@@ -71,7 +108,8 @@ pytest                            # add -m "not contract" to skip the ~1 min ful
 | `dashboards/` | 3 | BI files and screenshots |
 | `src/treasury/api/` | 4 | FastAPI: balances, payment status, KPIs, forecast, exceptions |
 | `docs/` | – | Architecture and the dataset design review |
-| `data/`, `data_small/` | – | Generated output (git-ignored, reproducible from seed): `warehouse/`, `landing/` (monthly Parquet), `truth/` (hidden answers), `csv/` (small profile) |
+| `docs/dataset/` | – | Dataset card and sample CSVs, auto-generated and committed so GitHub can preview the data |
+| `data/`, `data_small/` | – | Generated output (git-ignored, reproducible from seed): `warehouse/`, `landing/` (monthly Parquet), `truth/` (hidden answers), `exports/` (Excel workbook + CSVs, small profile) |
 
 ## The nine analyses
 

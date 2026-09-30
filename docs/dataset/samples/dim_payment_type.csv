@@ -1,0 +1,14 @@
+type_id,rail,is_instant,is_batch,is_cross_border,cut_off_local,typical_settlement_days,base_fail_rate
+1,FAST,1,0,0,,,0.004
+2,GIRO,0,1,0,15:00,1.0,0.01
+3,MEPS_RTGS,0,0,0,17:30,0.0,0.002
+4,SEPA_CT,0,1,0,15:00,1.0,0.006
+5,SEPA_INST,1,0,0,,,0.005
+6,ACH,0,1,0,14:45,1.0,0.008
+7,FEDWIRE,0,0,0,18:00,0.0,0.002
+8,BACS,0,1,0,16:00,2.0,0.007
+9,NEFT,0,1,0,18:00,0.0,0.012
+10,CNAPS,0,0,0,17:00,0.0,0.01
+11,SWIFT_XBORDER,0,0,1,16:00,,0.03
+12,CARD,0,1,0,,2.0,0.003
+13,BOOK_TRANSFER,1,0,0,,,0.0

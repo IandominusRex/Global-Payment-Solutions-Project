@@ -1,0 +1,13 @@
+reason_code,description,category,is_fixable_at_source
+AC01,Incorrect account number,data,1
+AC04,Closed account number,data,1
+BE04,Missing creditor address,data,1
+RR03,Missing creditor name or address (regulatory),data,1
+RC01,Bank identifier incorrect,data,1
+AM04,Insufficient funds,funds,0
+AM02,Amount exceeds allowed maximum,funds,1
+AG01,Transaction forbidden,compliance,0
+RR04,Regulatory reason,compliance,0
+FF01,Invalid file format,technical,1
+MS03,Reason not specified,technical,0
+CUST,Requested by customer (return),other,0

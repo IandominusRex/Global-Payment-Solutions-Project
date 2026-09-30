@@ -125,6 +125,7 @@ class LedgerConfig(BaseModel):
 class StreamConfig(BaseModel):
     tick_sim_seconds: int = Field(gt=0)
     default_days: int = Field(gt=0)
+    export_every_ticks: int = Field(default=0, ge=0)  # refresh exports every N ticks (0 = only when the stream ends)
 
 
 class Rail(BaseModel):
@@ -170,6 +171,8 @@ class OutputConfig(BaseModel):
     landing_dir: Path
     warehouse_url: str
     truth_dir: Path
+    export_dir: Path | None = None   # if set: Excel workbook + CSVs are rebuilt after a backfill and while streaming
+    docs_dir: Path | None = None     # if set: dataset card + sample CSVs (committed, previewable on GitHub)
 
 
 class SimulationConfig(BaseModel):

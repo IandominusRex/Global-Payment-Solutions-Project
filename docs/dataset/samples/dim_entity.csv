@@ -1,0 +1,12 @@
+entity_id,name,country,legal_type,functional_currency,is_in_house_bank,size,primary_channel,net_bias,timezone
+E01,Group Treasury HQ,SG,HoldCo,SGD,1,0.3,API,0.0,Asia/Singapore
+E02,SG Operations,SG,OpCo,SGD,0,1.4,API,0.15,Asia/Singapore
+E03,Shanghai Mfg,CN,WFOE,CNY,0,1.6,LEGACY_FILE,0.0,Asia/Shanghai
+E04,Shenzhen Sourcing,CN,WFOE,CNY,0,1.2,LEGACY_FILE,0.0,Asia/Shanghai
+E05,India Services,IN,PvtLtd,INR,0,0.8,H2H_FILE,0.45,Asia/Kolkata
+E06,Germany GmbH,DE,GmbH,EUR,0,1.5,H2H_FILE,-0.2,Europe/Berlin
+E07,Germany Sales Office,DE,Branch,EUR,0,0.5,PORTAL,0.15,Europe/Berlin
+E08,Netherlands BV,NL,BV,EUR,0,0.9,API,0.15,Europe/Amsterdam
+E09,UK Ltd,GB,Ltd,GBP,0,0.9,H2H_FILE,0.15,Europe/London
+E10,US Inc,US,Inc,USD,0,1.6,API,0.15,America/New_York
+E11,US West Distribution,US,LLC,USD,0,0.8,PORTAL,0.15,America/New_York

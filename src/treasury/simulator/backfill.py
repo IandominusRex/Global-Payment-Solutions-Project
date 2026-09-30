@@ -26,6 +26,7 @@ from treasury.simulator.lifecycle import state_machine, timing
 from treasury.simulator.market import hedging
 from treasury.simulator.market.fx import build_fx_rates
 from treasury.simulator.recon import statements
+from treasury.simulator.sinks.exports import refresh_exports
 from treasury.simulator.sinks.warehouse import create_schema, get_engine, replace_rows
 from treasury.simulator.world.builder import World, build_world
 from treasury.simulator.world.calendar import BusinessCalendar, build_dim_calendar, build_dim_date
@@ -234,4 +235,5 @@ def run_backfill(cfg: SimulationConfig, log=print) -> Dataset:
     log(f"Loaded warehouse in {time.perf_counter() - t1:.1f}s -> {cfg.output.warehouse_url}")
     for name, df in ds.tables.items():
         log(f"  {name:<20} {len(df):>10,} rows")
+    refresh_exports(cfg, log=log)
     return ds

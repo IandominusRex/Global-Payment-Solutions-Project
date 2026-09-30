@@ -1,0 +1,51 @@
+counterparty_id,name,counterparty_type,country,risk_rating,avg_days_late,data_quality_score,uses_virtual_account,home_entity_id,first_seen_date
+C0001,"Nielsen, Villa and May",supplier,US,low,0.0,0.8833288179409194,0,E02,2024-10-03
+C0013,鸿睿思博传媒有限公司,customer,CN,medium,17.774054378927563,0.8146161383250716,1,E06,2024-10-21
+C0025,Hughes PLC,customer,AE,medium,0.0,0.9572044955080624,0,E10,2024-10-07
+C0037,Eigenwillig GbR,supplier,DE,low,0.0,0.5523318132753563,0,E10,2024-10-09
+C0049,Anand-Bhagat,customer,IN,medium,10.911287730328054,0.8208810281587924,1,E01,2024-10-10
+C0061,Tax Authority CN (E04),tax_authority,CN,medium,0.0,0.8055071195914907,0,E04,2024-10-15
+C0073,Barry Ltd,supplier,US,low,0.0,0.8956706401373238,0,E03,2024-10-02
+C0085,Baker Inc,customer,US,low,0.0,0.8540702491416526,0,E03,2024-10-03
+C0097,Babu-Morar,customer,IN,medium,0.0,0.9899112615496101,1,E05,2024-10-03
+C0109,"Guha, Bail and Chacko",customer,IN,medium,0.0,0.999492186173213,0,E09,2024-10-07
+C0121,毕博诚科技有限公司,supplier,CN,medium,0.0,0.8566042834060085,0,E11,2024-10-09
+C0133,雨林木风计算机传媒有限公司,supplier,CN,medium,0.0,0.8215473024422421,0,E10,2024-10-01
+C0145,Hornig,supplier,DE,low,0.0,0.9578725713363955,0,E10,2024-10-01
+C0157,Swanson PLC,customer,SG,low,0.0,0.9223044070007397,0,E08,2024-10-07
+C0169,浙大万朋信息有限公司,supplier,CN,medium,0.0,0.9953775132961152,0,E10,2024-10-01
+C0181,Textor Weiß GmbH & Co. OHG,supplier,DE,low,0.0,0.9309116574849113,0,E07,2024-10-01
+C0193,Huhn Stey AG & Co. KGaA,customer,DE,low,17.53608541187983,0.9149997609609649,0,E02,2024-10-02
+C0205,"Howell, Shea and Daniel",supplier,AE,medium,0.0,0.8925807747346539,0,E06,2024-10-07
+C0217,Tax Authority GB (E09),tax_authority,GB,low,0.0,0.9010736219349939,0,E09,2024-10-15
+C0229,Raghavan Inc,supplier,IN,medium,0.0,0.7729685148033372,0,E01,2024-10-10
+C0241,Jackson Inc,supplier,AU,low,0.0,0.9389348718780917,0,E03,2024-10-08
+C9003,Diaz Inc,supplier,JP,low,0.0,0.9988796616373233,0,E11,2025-10-02
+C9015,Waters-Owens,supplier,JP,low,0.0,0.9071607477852802,0,E03,2026-02-19
+C9027,"Beck, Brown and Miles",supplier,US,low,0.0,0.8903735055879766,0,E04,2024-10-10
+C9039,Smith PLC,supplier,CN,medium,0.0,0.9018417257098644,0,E02,2026-01-22
+C9051,"Johnson, Sawyer and Mendez",supplier,GB,low,0.0,0.9818243008161999,0,E10,2026-04-09
+C9063,Fields-Austin,supplier,IN,medium,0.0,0.9685723630970802,0,E08,2024-10-24
+C9075,Woods and Sons,supplier,DE,low,0.0,0.9872103589549202,0,E11,2025-06-10
+C9087,Brown Ltd,supplier,VN,medium,0.0,0.9375885195399363,0,E09,2025-10-09
+C9099,"Hunt, Schwartz and Chavez",supplier,US,low,0.0,0.99978388902001,0,E02,2025-05-15
+C9111,"Powell, Fisher and Kelly",supplier,NL,low,0.0,0.9089243209655279,0,E04,2026-02-05
+C9123,Woodard-Adams,supplier,GB,low,0.0,0.9830650850058514,0,E02,2024-12-24
+C9135,Johnson-Smith,supplier,GB,low,0.0,0.9193695151059247,0,E02,2026-03-17
+C9147,George-Schwartz,supplier,SG,low,0.0,0.8865723315128676,0,E09,2025-04-17
+C9159,Sandoval Ltd,supplier,AU,low,0.0,0.9205186108592405,0,E06,2026-06-30
+C9171,Salinas-Goodman,supplier,IN,medium,0.0,0.895838016960559,0,E02,2025-11-20
+C9183,"Black, Marshall and Owens",supplier,AE,medium,0.0,0.9768262572619157,0,E06,2026-08-13
+C9195,"Taylor, Cooper and Stewart",supplier,AU,low,0.0,0.9095611082102689,0,E05,2024-11-28
+C9207,Ball Inc,supplier,AU,low,0.0,0.9797764089719623,0,E11,2025-07-15
+C9219,"Harris, Smith and Harrell",supplier,GB,low,0.0,0.9232979861608399,0,E09,2026-01-22
+C9231,Walker and Sons,supplier,SG,low,0.0,0.9179621223680855,0,E09,2026-08-18
+C9243,"Wright, Yu and Bush",supplier,MY,low,0.0,0.9676853233221153,0,E05,2026-02-05
+C9255,"Thomas, Long and Lewis",supplier,NL,low,0.0,0.8741163115799099,0,E03,2026-06-23
+C9267,Watson Group,supplier,JP,low,0.0,0.9731814508068763,0,E02,2026-01-15
+C9279,Clarke-Mcintyre,supplier,US,low,0.0,0.85290579401242,0,E04,2026-01-06
+C9291,Oliver-Craig,supplier,JP,low,0.0,0.983171128784278,0,E06,
+C9303,Williams PLC,supplier,AU,low,0.0,0.8545139954365073,0,E05,2026-06-30
+C9315,"Moore, Ferguson and Delgado",supplier,VN,medium,0.0,0.9343136314458397,0,E02,2024-12-26
+C9327,Bailey and Sons,supplier,US,low,0.0,0.924183478638423,0,E08,2026-04-30
+C9339,"Bryant, Sweeney and Strickland",supplier,IN,medium,0.0,0.9399442154130007,0,E04,2025-01-23

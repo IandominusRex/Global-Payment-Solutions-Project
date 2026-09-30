@@ -1,0 +1,16 @@
+country_code,name,region,timezone,risk_rating,settlement_currency
+SG,Singapore,APAC,Asia/Singapore,low,SGD
+CN,China,APAC,Asia/Shanghai,medium,CNY
+IN,India,APAC,Asia/Kolkata,medium,INR
+DE,Germany,EMEA,Europe/Berlin,low,EUR
+NL,Netherlands,EMEA,Europe/Amsterdam,low,EUR
+GB,United Kingdom,EMEA,Europe/London,low,GBP
+US,United States,AMER,America/New_York,low,USD
+VN,Vietnam,APAC,Asia/Ho_Chi_Minh,medium,USD
+MY,Malaysia,APAC,Asia/Kuala_Lumpur,low,USD
+ID,Indonesia,APAC,Asia/Jakarta,medium,USD
+JP,Japan,APAC,Asia/Tokyo,low,USD
+AU,Australia,APAC,Australia/Sydney,low,USD
+AE,UAE,EMEA,Asia/Dubai,medium,USD
+XA,Highrisk Alpha,EMEA,UTC,high,USD
+XB,Highrisk Beta,AMER,UTC,high,USD

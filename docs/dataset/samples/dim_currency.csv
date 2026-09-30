@@ -1,0 +1,7 @@
+currency_code,name,decimals,is_restricted
+SGD,Singapore Dollar,2,0
+USD,US Dollar,2,0
+EUR,Euro,2,0
+GBP,Pound Sterling,2,0
+CNY,Chinese Yuan,2,1
+INR,Indian Rupee,2,1

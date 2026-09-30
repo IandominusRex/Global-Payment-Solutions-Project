@@ -17,6 +17,7 @@ dependencies = [
     "holidays>=0.50",
     "faker>=24",
     "sqlalchemy>=2.0",
+    "xlsxwriter>=3.1",
 ]
 
 [project.optional-dependencies]
