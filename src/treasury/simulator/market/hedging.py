@@ -55,11 +55,12 @@ def build(cfg: SimulationConfig, payments: pd.DataFrame, dim_entity: pd.DataFram
                      "buy_currency": buy, "sell_currency": sell, "buy_amount": round(buy_amt, 2),
                      "sell_amount": round(sell_amt, 2), "forward_rate": round(fwd, 6)})
     h = pd.DataFrame(rows)
+    h = h[h["trade_date"] >= np.datetime64(cfg.start_date)] if len(h) else h
     if h.empty:
         return pd.DataFrame(columns=HEDGE_COLUMNS + ["_trade_date"])
     h = h.sort_values(["trade_date", "entity_id", "buy_currency", "sell_currency"]).reset_index(drop=True)
     h["hedge_id"] = [f"H{i:06d}" for i in range(1, len(h) + 1)]
     h["trade_date_id"] = pd.to_datetime(h["trade_date"]).dt.strftime("%Y%m%d").astype(int)
     h["maturity_date_id"] = pd.to_datetime(h["maturity_date"]).dt.strftime("%Y%m%d").astype(int)
-    h["_trade_date"] = pd.to_datetime(h["trade_date"])
+    h["_trade_date"] = pd.to_datetime(h["trade_date"]) + pd.Timedelta(hours=9)  # booked in the morning
     return h[HEDGE_COLUMNS + ["_trade_date"]]

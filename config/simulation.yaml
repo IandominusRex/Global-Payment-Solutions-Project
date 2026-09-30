@@ -137,7 +137,7 @@ anomalies:                          # business anomalies: valid money movements,
   structuring_rate: 0.001           # amounts in [0.9, 1.0) x threshold
   round_amount_rate: 0.003
   burst_rate: 0.0005
-  high_risk_country_share: 0.01
+  high_risk_country_share: 0.003
   new_beneficiary_high_value_rate: 0.0003
   off_hours_rate: 0.002
 

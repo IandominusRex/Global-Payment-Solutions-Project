@@ -135,8 +135,8 @@ def snapshot(sim: Simulation, t: pd.Timestamp, balance_date_max: date | None = N
                     & ((sim.sweeps["sweep_ts"] <= t) | (sim.sweeps["date_id"] <= bmax))]
 
     tables.update({
-        "fact_fx_rate": fx[fx["date_id"] <= int((t - pd.Timedelta(seconds=1)).strftime("%Y%m%d"))
-                           ].reset_index(drop=True),
+        "fact_fx_rate": fx[fx["date_id"] <= min(int((t - pd.Timedelta(seconds=1)).strftime("%Y%m%d")),
+                                                bmax or 99_999_999)].reset_index(drop=True),
         "fact_invoice": inv[["invoice_id", "direction", "entity_id", "counterparty_id", "invoice_ref",
                              "currency_code", "amount", "issue_date_id", "due_date_id", "status"]
                             ].reset_index(drop=True),
@@ -144,7 +144,7 @@ def snapshot(sim: Simulation, t: pd.Timestamp, balance_date_max: date | None = N
         "fact_payment_event": ev.reset_index(drop=True),
         "fact_balance": bal.drop(columns="_eod_ts").reset_index(drop=True),
         "fact_sweep": sw.reset_index(drop=True),
-        "fact_statement_line": cut_lines(sim.statement_lines, t),
+        "fact_statement_line": cut_lines(sim.statement_lines[sim.statement_lines["booking_date_id"] >= start_id], t),
         "fact_fx_hedge": sim.hedges[sim.hedges["_trade_date"] <= t].drop(columns="_trade_date").reset_index(drop=True),
     })
     lines = tables["fact_statement_line"]["line_id"]
@@ -162,7 +162,10 @@ def cut_lines(lines: pd.DataFrame, t: pd.Timestamp) -> pd.DataFrame:
 
 
 def backfill_cut(cfg: SimulationConfig) -> pd.Timestamp:
-    return pd.Timestamp(cfg.end_date) + pd.Timedelta(days=1)
+    """The instant (UTC) the last entity timezone finishes end_date, so every table agrees."""
+    day_after = pd.Timestamp(cfg.end_date) + pd.Timedelta(days=1)
+    return max(day_after.tz_localize(cfg.countries[e.country].timezone).tz_convert("UTC").tz_localize(None)
+               for e in cfg.entities)
 
 
 def simulate(cfg: SimulationConfig) -> Dataset:

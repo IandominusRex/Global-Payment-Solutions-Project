@@ -69,7 +69,7 @@ def inject(cfg: SimulationConfig, world: World, fx: Fx, intents: pd.DataFrame) -
 
     # round_amount
     for _ in range(int(n * a.round_amount_rate)):
-        amt = float(rng.choice([10_000, 20_000, 25_000, 50_000, 100_000, 250_000]))
+        amt = float(rng.choice([5_000, 10_000, 20_000, 25_000, 50_000]))
         e, c, d = rng.choice(entities), rng.choice(suppliers), rng.choice(days)
         ccy = ent.loc[e, "functional_currency"]
         new_payment(e, c, amt * fx.to_sgd(np.array([ccy]), np.array([d]))[0], d, "round_amount",
@@ -85,7 +85,7 @@ def inject(cfg: SimulationConfig, world: World, fx: Fx, intents: pd.DataFrame) -
     # high_risk_country
     risky = cp.loc[cp["country"].isin(cfg.high_risk_countries), "counterparty_id"].to_numpy()
     for _ in range(int(n * a.high_risk_country_share) if len(risky) else 0):
-        new_payment(rng.choice(entities), rng.choice(risky), rng.lognormal(np.log(40_000), 0.8), rng.choice(days),
+        new_payment(rng.choice(entities), rng.choice(risky), rng.lognormal(np.log(15_000), 0.8), rng.choice(days),
                     "high_risk_country")
 
     # new_beneficiary_high_value: create the beneficiary, then pay it a large amount at once.
@@ -102,7 +102,7 @@ def inject(cfg: SimulationConfig, world: World, fx: Fx, intents: pd.DataFrame) -
                         "avg_days_late": 0.0, "data_quality_score": float(rng.uniform(0.85, 1.0)),
                         "uses_virtual_account": False, "home_entity_id": str(rng.choice(entities)),
                         "first_seen_date": pd.NaT})
-        new_payment(new_cps[-1]["home_entity_id"], cid, rng.lognormal(np.log(250_000), 0.5), rng.choice(days),
+        new_payment(new_cps[-1]["home_entity_id"], cid, rng.lognormal(np.log(120_000), 0.5), rng.choice(days),
                     "new_beneficiary_high_value")
 
     # off_hours: move existing payments to the night or a weekend.

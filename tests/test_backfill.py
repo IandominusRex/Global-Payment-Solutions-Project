@@ -152,13 +152,18 @@ def test_stream_ends_identical_to_a_snapshot(small_cfg, tmp_path):
     assert list((tmp_path / "landing" / "stream" / "payment").glob("*.parquet"))
 
 
-def test_bank_statements_reconcile_to_the_ledger(small_cfg, sim, ds):
+def test_bank_statements_reconcile_to_the_ledger(ds):
+    """Statement continuity: closing(last day) - closing(first day) == sum of lines booked in between."""
     lines = ds.tables["fact_statement_line"]
-    cut = backfill_cut(small_cfg)
-    signed = np.where(lines["credit_debit"] == "CRDT", 1, -1) * lines["amount"]
-    by_acct = pd.Series(signed).groupby(lines["account_id"].to_numpy()).sum()
-    post = sim.postings[sim.postings["posting_ts"] <= cut].groupby("account_id")["delta"].sum()
-    assert np.allclose(by_acct.reindex(post.index).fillna(0), post, atol=0.05)
+    bal = ds.tables["fact_balance"]
+    first, last = bal["date_id"].min(), bal["date_id"].max()
+    window = lines[(lines["booking_date_id"] > first) & (lines["booking_date_id"] <= last)]
+    moved = pd.Series(np.where(window["credit_debit"] == "CRDT", 1, -1) * window["amount"]).groupby(
+        window["account_id"].to_numpy()).sum()
+    b = bal.pivot(index="account_id", columns="date_id", values="closing_balance")
+    change = b[last] - b[first]
+    assert np.allclose(moved.reindex(change.index).fillna(0), change, atol=0.05)
+    assert lines["booking_date_id"].min() >= first
     truth = ds.truth["statement_payment"]
     assert truth["line_id"].isin(lines["line_id"]).all() and lines["line_id"].is_unique
 

@@ -53,8 +53,16 @@ class Streamer:
         self.change_ts, self.change_row = ts[ok][order], rows[ok][order]
         self.ev_ts = sim.events["event_ts"].to_numpy()
         self.inv = sim.invoices.assign(issue_date_id=_date_id(sim.invoices["issue_date"]),
-                                       due_date_id=_date_id(sim.invoices["due_date"]))
+                                       due_date_id=_date_id(sim.invoices["due_date"])).reset_index(drop=True)
+        self.inv_issue = self.inv["issue_date_id"].to_numpy()
         self.seen_cp: set[str] = set()
+        # Lookups built once: per-tick membership tests on ~1M-row string columns are slow.
+        alloc = sim.allocation.reset_index(drop=True)
+        self.alloc = alloc
+        self.payment_row = {pid: i for i, pid in enumerate(p["payment_id"])}
+        self.invoice_row = {iid: i for i, iid in enumerate(self.inv["invoice_id"])}
+        self.alloc_rows_by_payment = alloc.groupby("payment_id").indices
+        self.alloc_rows_by_invoice = alloc.groupby("invoice_id").indices
 
     def _window(self, arr: np.ndarray, prev: pd.Timestamp, now: pd.Timestamp) -> slice:
         return slice(np.searchsorted(arr, prev.to_datetime64(), "right"),
@@ -82,19 +90,24 @@ class Streamer:
             out.tables["dim_counterparty"] = cps
 
         prev_day, now_day = _day_id(prev), _day_id(now)
-        touched = set(sim.allocation.loc[sim.allocation["payment_id"].isin(p["payment_id"]), "invoice_id"])
-        inv = self.inv[((self.inv["issue_date_id"] > prev_day) & (self.inv["issue_date_id"] <= now_day))
-                       | self.inv["invoice_id"].isin(touched)]
-        if len(inv):
-            p_all = asof.payments_as_of(sim.payments[sim.payments["payment_id"].isin(
-                sim.allocation.loc[sim.allocation["invoice_id"].isin(inv["invoice_id"]), "payment_id"])], now)
-            inv = asof.invoices_as_of(inv, sim.allocation, p_all, now)
+        alloc_rows = [r for pid in p["payment_id"] for r in self.alloc_rows_by_payment.get(pid, ())]
+        touched = set(self.alloc["invoice_id"].to_numpy()[alloc_rows])
+        inv_rows = set(np.flatnonzero((self.inv_issue > prev_day) & (self.inv_issue <= now_day)))
+        inv_rows |= {self.invoice_row[i] for i in touched if i in self.invoice_row}
+        if inv_rows:
+            inv = self.inv.iloc[sorted(inv_rows)]
+            sub_alloc = self.alloc.iloc[sorted({r for i in inv["invoice_id"]
+                                                for r in self.alloc_rows_by_invoice.get(i, ())})]
+            pay_rows = sorted({self.payment_row[pid] for pid in sub_alloc["payment_id"]})
+            p_all = asof.payments_as_of(sim.payments.iloc[pay_rows], now)
+            inv = asof.invoices_as_of(inv, sub_alloc, p_all, now)
             out.tables["fact_invoice"] = inv[["invoice_id", "direction", "entity_id", "counterparty_id",
                                               "invoice_ref", "currency_code", "amount", "issue_date_id",
                                               "due_date_id", "status"]].reset_index(drop=True)
 
         ev = sim.events.iloc[self._window(self.ev_ts, prev, now)]
-        out.tables["fact_payment_event"] = ev[ev["payment_id"].isin(self.visible_payments)].reset_index(drop=True)
+        visible = np.array([pid in self.visible_payments for pid in ev["payment_id"]], dtype=bool)
+        out.tables["fact_payment_event"] = ev[visible].reset_index(drop=True)
 
         b = sim.balances
         out.tables["fact_balance"] = b[(b["_eod_ts"] > prev) & (b["_eod_ts"] <= now)].drop(
@@ -149,8 +162,8 @@ def run_stream(cfg: SimulationConfig, days: int | None = None, speed: float = 30
                 _write_micro_batch(cfg, stream_dir, res)
             if webhook:
                 post_notifications(webhook, res.tables["fact_payment_event"], res.tables["fact_payment"], log)
-            log(f"[{now:%Y-%m-%d %H:%M} UTC] "
-                + ", ".join(f"{k.removeprefix('fact_')}={len(v)}" for k, v in res.tables.items() if len(v)))
+            changes = ", ".join(f"{k.removeprefix('fact_')}={len(v)}" for k, v in res.tables.items() if len(v))
+            log(f"[{now:%Y-%m-%d %H:%M} UTC] {changes or 'no changes'}")
     except KeyboardInterrupt:
         log(f"Stopped at simulated {clock.now}")
     return sim
