@@ -15,8 +15,8 @@ def exported(cfg, tmp_path_factory) -> SimulationConfig:
     raw = cfg.model_dump()
     raw["backfill_months"] = 2
     raw["volumes"]["payments_per_business_day"] = 100
-    raw["output"] = {"landing_dir": tmp / "landing", "truth_dir": tmp / "truth", "export_dir": tmp / "exports",
-                     "docs_dir": tmp / "docs", "warehouse_url": f"sqlite:///{tmp / 'wh.sqlite'}"}
+    raw["output"] = {"raw_dir": tmp / "raw", "answer_key_dir": tmp / "answer_key", "export_dir": tmp / "exports",
+                     "docs_dir": tmp / "docs", "clean_db_url": f"sqlite:///{tmp / 'wh.sqlite'}"}
     out = SimulationConfig.model_validate(raw)
     run_backfill(out, log=lambda *_: None)
     return out
@@ -35,4 +35,5 @@ def test_dataset_card_and_samples(exported):
     assert "## At a glance" in card and "### `fact_payment`" in card
     sample = pd.read_csv(exported.output.docs_dir / "samples" / "fact_payment.csv")
     assert 0 < len(sample) <= SAMPLE_ROWS
-    assert "truth" not in "".join(p.name for p in (exported.output.docs_dir / "samples").glob("*"))
+    assert not {p.stem for p in (exported.output.docs_dir / "samples").glob("*")} & {
+        "dq_defects", "business_anomalies", "payment_to_invoice", "statement_line_to_payment", "payment_business_flow"}

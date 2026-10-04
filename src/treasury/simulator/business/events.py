@@ -83,7 +83,7 @@ def generate(cfg: SimulationConfig, world: World, cal: BusinessCalendar, fx: Fx,
     """Return (invoices, payment intents, allocation) for data_start..end (default end_date).
 
     allocation maps intent_id -> invoice_id(s) with the amount each payment settles;
-    it becomes hidden ground truth for reconciliation (analysis 8).
+    it goes into the answer key for reconciliation (analysis 8).
     """
     gen = _Generator(cfg, world, cal, fx, end)
     ar_inv, ar_pay = gen.ar_receipts()

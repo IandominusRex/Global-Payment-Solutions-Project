@@ -1,4 +1,4 @@
-"""Warehouse sink: creates the star schema and bulk-loads DataFrames.
+"""Clean-database sink: creates the star schema and bulk-loads DataFrames.
 
 SQLAlchemy keeps SQLite (default) and PostgreSQL interchangeable via the URL.
 SQLite runs in WAL mode so the API and BI tools can read while the stream writes.

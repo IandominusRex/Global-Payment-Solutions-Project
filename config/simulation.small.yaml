@@ -1,5 +1,5 @@
 # SMALL profile: ~180 payments/business day for a CSV/Excel-friendly dataset. Use with --config config/simulation.small.yaml
-# Single source of truth for the simulator. Validated by treasury.simulator.config.
+# Every simulation parameter lives in this file. Validated by treasury.simulator.config.
 # Changing a number changes the story the data tells (see docs/dataset-design-review.md).
 
 seed: 7   # 42 is borderline on the failure-Pareto contract at this volume
@@ -135,7 +135,7 @@ scenarios:
   legacy_file_channel_stp_penalty: 0.10
   late_payer_share: 0.25
 
-anomalies:                          # business anomalies: valid money movements, labelled in label_anomaly
+anomalies:                          # business anomalies: valid money movements, labelled in business_anomalies
   duplicate_payment_rate: 0.004
   structuring_threshold_sgd: 20000
   structuring_rate: 0.004           # amounts in [0.9, 1.0) x threshold
@@ -147,15 +147,15 @@ anomalies:                          # business anomalies: valid money movements,
 
 data_quality:                       # dirty-data defects: raw layer only, never posted to the ledger
   null_purpose_code_rate: 0.03
-  bad_currency_code_rate: 0.005    # e.g. "usd", "SGP", "EUR " - NOT real ISO codes like SDG
+  bad_currency_code_rate: 0.005    # misspelling of the true code, e.g. "usd", "US$", "EUR " - NOT real ISO codes like SDG
   negative_amount_rate: 0.003
   time_order_violation_rate: 0.005
   resent_file_duplicate_rate: 0.004
   inconsistent_country_name_rate: 0.01
 
 output:
-  landing_dir: data_small/landing        # raw (dirty) timestamped batches, Parquet
-  warehouse_url: sqlite:///data_small/warehouse/treasury.sqlite
+  raw_dir: data_small/raw        # raw (dirty) timestamped batches, Parquet
+  clean_db_url: sqlite:///data_small/clean/treasury.sqlite
   export_dir: data_small/exports    # treasury_dataset.xlsx (one sheet per table) + csv/, rebuilt automatically
   docs_dir: docs/dataset            # dataset card + samples, committed so GitHub can preview the data
-  truth_dir: data_small/truth            # hidden ground-truth labels, never loaded into the warehouse
+  answer_key_dir: data_small/answer_key            # the answer key: never loaded into the clean database

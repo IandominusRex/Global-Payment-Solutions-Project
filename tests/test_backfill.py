@@ -19,8 +19,8 @@ def small_cfg(cfg, tmp_path_factory) -> SimulationConfig:
     raw = cfg.model_dump()
     raw["backfill_months"] = 3
     raw["volumes"]["payments_per_business_day"] = 200
-    raw["output"] = {"landing_dir": tmp / "landing", "truth_dir": tmp / "truth",
-                     "warehouse_url": f"sqlite:///{tmp / 'wh.sqlite'}"}
+    raw["output"] = {"raw_dir": tmp / "raw", "answer_key_dir": tmp / "answer_key",
+                     "clean_db_url": f"sqlite:///{tmp / 'wh.sqlite'}"}
     return SimulationConfig.model_validate(raw)
 
 
@@ -109,29 +109,29 @@ def test_intercompany_legs_mirror(ds):
 
 
 def test_every_allocation_points_at_a_real_invoice(ds):
-    alloc = ds.truth["payment_invoice"]
+    alloc = ds.answer_key["payment_to_invoice"]
     assert alloc["invoice_id"].isin(ds.tables["fact_invoice"]["invoice_id"]).all()
     assert alloc["payment_id"].isin(ds.tables["fact_payment"]["payment_id"]).all()
 
 
 def test_outputs_written(small_cfg, ds):
-    assert list((small_cfg.output.landing_dir / "payments").glob("*.parquet"))
-    assert (small_cfg.output.truth_dir / "payment_invoice.parquet").exists()
-    con = sqlite3.connect(small_cfg.output.warehouse_url.removeprefix("sqlite:///"))
+    assert list((small_cfg.output.raw_dir / "payments").glob("*.parquet"))
+    assert (small_cfg.output.answer_key_dir / "payment_to_invoice.parquet").exists()
+    con = sqlite3.connect(small_cfg.output.clean_db_url.removeprefix("sqlite:///"))
     for t in ["fact_payment", "fact_payment_event", "fact_balance", "fact_sweep"]:
         assert con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] == len(ds.tables[t])
     assert con.execute("PRAGMA foreign_key_check").fetchall() == []
     tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert not any(t.startswith("label_") or t.startswith("truth") for t in tables)
+    assert not set(ds.answer_key) & tables  # answer-key tables never enter the clean database
 
 
 def test_stream_ends_identical_to_a_snapshot(small_cfg, tmp_path):
-    """Streaming tick by tick must leave the warehouse exactly as a snapshot at the same time."""
+    """Streaming tick by tick must leave the clean database exactly as a snapshot at the same time."""
     from treasury.simulator.stream import run_stream
 
     raw = small_cfg.model_dump()
-    raw["output"] = {"landing_dir": tmp_path / "landing", "truth_dir": tmp_path / "truth",
-                     "warehouse_url": f"sqlite:///{tmp_path / 'stream.sqlite'}"}
+    raw["output"] = {"raw_dir": tmp_path / "raw", "answer_key_dir": tmp_path / "answer_key",
+                     "clean_db_url": f"sqlite:///{tmp_path / 'stream.sqlite'}"}
     raw["stream"]["tick_sim_seconds"] = 3 * 3600
     cfg = SimulationConfig.model_validate(raw)
     sim = run_stream(cfg, days=2, speed=0, log=lambda *_: None)
@@ -149,7 +149,7 @@ def test_stream_ends_identical_to_a_snapshot(small_cfg, tmp_path):
     exp = expected.tables["fact_payment"].set_index("payment_id")["settled_ts"]
     assert (pd.to_datetime(got["settled_ts"]).reindex(exp.index).fillna(pd.Timestamp(0))
             == exp.fillna(pd.Timestamp(0))).all()
-    assert list((tmp_path / "landing" / "stream" / "payment").glob("*.parquet"))
+    assert list((tmp_path / "raw" / "stream" / "payment").glob("*.parquet"))
 
 
 def test_bank_statements_reconcile_to_the_ledger(ds):
@@ -164,24 +164,24 @@ def test_bank_statements_reconcile_to_the_ledger(ds):
     change = b[last] - b[first]
     assert np.allclose(moved.reindex(change.index).fillna(0), change, atol=0.05)
     assert lines["booking_date_id"].min() >= first
-    truth = ds.truth["statement_payment"]
-    assert truth["line_id"].isin(lines["line_id"]).all() and lines["line_id"].is_unique
+    answer_key = ds.answer_key["statement_line_to_payment"]
+    assert answer_key["line_id"].isin(lines["line_id"]).all() and lines["line_id"].is_unique
 
 
-def test_raw_landing_is_dirty_but_warehouse_is_clean(small_cfg, ds):
-    raw = pd.concat(pd.read_parquet(f) for f in (small_cfg.output.landing_dir / "payments").glob("*.parquet"))
-    labels = pd.read_parquet(small_cfg.output.truth_dir / "label_dq.parquet")
+def test_raw_is_dirty_but_clean_db_is_clean(small_cfg, ds):
+    raw = pd.concat(pd.read_parquet(f) for f in (small_cfg.output.raw_dir / "payments").glob("*.parquet"))
+    labels = pd.read_parquet(small_cfg.output.answer_key_dir / "dq_defects.parquet")
     assert set(labels["defect_type"]) >= {"null_purpose_code", "resent_file_duplicate"}
     n_dup = (labels["defect_type"] == "resent_file_duplicate").sum()
     assert len(raw) == len(ds.tables["fact_payment"]) + n_dup
     assert (raw["amount"] < 0).sum() == (labels["defect_type"] == "negative_amount").sum()
-    wh = ds.tables["fact_payment"]
-    assert (wh["amount"] > 0).all() and wh["purpose_code"].notna().all()
-    assert wh["currency_code"].isin(small_cfg.currencies).all() and wh["payment_id"].is_unique
+    clean = ds.tables["fact_payment"]
+    assert (clean["amount"] > 0).all() and clean["purpose_code"].notna().all()
+    assert clean["currency_code"].isin(small_cfg.currencies).all() and clean["payment_id"].is_unique
 
 
 def test_anomalies_are_labelled_and_new_beneficiaries_are_new(ds):
-    labels = ds.truth["label_anomaly"]
+    labels = ds.answer_key["business_anomalies"]
     p = ds.tables["fact_payment"].merge(labels, on="payment_id")
     nb = p[p["anomaly_type"] == "new_beneficiary_high_value"]
     cps = ds.tables["dim_counterparty"].set_index("counterparty_id")
@@ -192,13 +192,13 @@ def test_anomalies_are_labelled_and_new_beneficiaries_are_new(ds):
 def test_camt053_export_balances(small_cfg, ds):
     import xml.etree.ElementTree as ET
 
+    from treasury.simulator.sinks.clean_db import get_engine
     from treasury.simulator.sinks.iso20022 import NS, build_camt053
-    from treasury.simulator.sinks.warehouse import get_engine
 
     lines = ds.tables["fact_statement_line"]
     busiest = lines.groupby(["account_id", "booking_date_id"]).size().idxmax()
     day = pd.to_datetime(str(busiest[1])).date()
-    tree = build_camt053(get_engine(small_cfg.output.warehouse_url), busiest[0], day)
+    tree = build_camt053(get_engine(small_cfg.output.clean_db_url), busiest[0], day)
     ns = {"c": NS}
     entries = tree.getroot().findall(".//c:Ntry", ns)
     assert len(entries) == len(lines[(lines["account_id"] == busiest[0]) & (lines["booking_date_id"] == busiest[1])])

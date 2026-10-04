@@ -11,7 +11,7 @@ visitor to the GitHub repo could look at without cloning and running the simulat
    sheets, so "a CSV with tabs" really means `.xlsx`.
 2. **It refreshes itself.** The exports are rebuilt at the end of every backfill, and during the live
    stream once per simulated day (`stream.export_every_ticks`) and again when the stream ends, so the
-   workbook always matches the warehouse. The workbook is written to a temp file and then renamed, so
+   workbook always matches the clean database. The workbook is written to a temp file and then renamed, so
    Excel never sees a half-written file. Cost: about 25 s per refresh, which is why it isn't per tick.
 3. **A dataset card for GitHub** (`docs/dataset/dataset-card.md`), inspired by how Kaggle summarises a
    dataset: headline numbers, payments by rail, top corridors, every column explained, and one example
@@ -25,7 +25,7 @@ visitor to the GitHub repo could look at without cloning and running the simulat
   comment fall back to a short glossary in `exports.py`.
 - **The full workbook is not committed** (about 40 MB, and it changes on every run). Only the small
   card and samples are, since they are enough to preview the data and diff nicely.
-- **Answer keys stay out of the samples and the card's examples.** The truth labels are what I test my
+- **Answer keys stay out of the samples and the card's examples.** The answer-key labels are what I test my
   own analysis against, so publishing them next to the data would defeat the point.
 
 ## Next

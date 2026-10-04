@@ -7,7 +7,7 @@ means matching the two, and the bank's formatting is what makes that hard:
   - charges are booked as separate lines
   - one customer payment may cover several invoices, or fall short of the invoice
 
-The true line -> payment link is written to data/truth/statement_payment.parquet only.
+The true line -> payment link is written to data/answer_key/statement_line_to_payment.parquet only.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ STATEMENT_COLUMNS = ["line_id", "account_id", "booking_date_id", "value_date_id"
 
 def build(postings: pd.DataFrame, payments: pd.DataFrame, dim_account: pd.DataFrame, dim_entity: pd.DataFrame,
           dim_counterparty: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Return (statement lines with internal _posting_ts, truth line->payment)."""
+    """Return (statement lines with internal _posting_ts, answer key line->payment)."""
     acc = dim_account.set_index("account_id")
     tz = acc["entity_id"].map(dim_entity.set_index("entity_id")["timezone"])
     p = payments.set_index("payment_id")
@@ -87,6 +87,6 @@ def build(postings: pd.DataFrame, payments: pd.DataFrame, dim_account: pd.DataFr
     out = out.reset_index(drop=True)
     out["line_id"] = [f"L{i:09d}" for i in range(1, len(out) + 1)]
     out["bank_reference"] = out["_bank"] + out["booking_date_id"].astype(str) + out["line_id"].str[-7:]
-    truth = out.loc[out["_payment_id"].notna(), ["line_id", "_payment_id"]].rename(
+    answer_key = out.loc[out["_payment_id"].notna(), ["line_id", "_payment_id"]].rename(
         columns={"_payment_id": "payment_id"})
-    return out[STATEMENT_COLUMNS + ["_posting_ts"]], truth.reset_index(drop=True)
+    return out[STATEMENT_COLUMNS + ["_posting_ts"]], answer_key.reset_index(drop=True)

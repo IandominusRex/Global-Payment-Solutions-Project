@@ -1,4 +1,4 @@
--- First look at the warehouse. Run one query at a time (in DBeaver: put the cursor in it, Ctrl/Cmd+Enter).
+-- First look at the clean database. Run one query at a time (in DBeaver: put the cursor in it, Ctrl/Cmd+Enter).
 -- Each one walks part of the diagram in docs/data-model.md. Read the comment, guess the answer, then run it.
 
 

@@ -10,7 +10,7 @@ Outcomes here ignore "now". What is visible at a given moment is decided later b
 (as of the simulated clock) share one engine. Balance-driven outcomes (AM04
 insufficient funds, intercompany top-ups) are applied afterwards by the ledger.
 
-Internal columns start with "_" and never reach the warehouse.
+Internal columns start with "_" and never reach the clean database.
 
 Final status meanings:
   completed  settled without a delay event

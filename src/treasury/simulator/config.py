@@ -168,9 +168,9 @@ class DataQualityConfig(BaseModel):
 
 
 class OutputConfig(BaseModel):
-    landing_dir: Path
-    warehouse_url: str
-    truth_dir: Path
+    raw_dir: Path
+    clean_db_url: str
+    answer_key_dir: Path
     export_dir: Path | None = None   # if set: Excel workbook + CSVs are rebuilt after a backfill and while streaming
     docs_dir: Path | None = None     # if set: dataset card + sample CSVs (committed, previewable on GitHub)
 

@@ -20,7 +20,7 @@
    └──────┬──────────────────────────┬──────────────────────┬──────────────┘
           │ raw batches + DQ defects │ hidden labels         │ clean load / upserts
           ▼                          ▼                       ▼
-   data/landing/*.parquet     data/truth/*.parquet     Part 2 WAREHOUSE (sql/schema/)
+   data/raw/*.parquet     data/answer_key/*.parquet     Part 2 CLEAN DATABASE (sql/schema/)
           │                   (never loaded)            SQLite (WAL) or Postgres
           ▼                                                  │
    Part 1b PIPELINE (src/treasury/pipeline)  ─ clean ───────►│
@@ -29,9 +29,9 @@
                                    src/treasury/analytics (forecast 5, anomaly models 9)
 ```
 
-The simulator loads the warehouse with clean data directly, so Parts 2–4 are never blocked.
-The raw landing files carry the same payments with injected defects. Cleaning them in
-Part 1b and comparing the result with the warehouse and `label_dq` is the Part 1 exercise.
+The simulator writes correct data straight into the clean database, so Parts 2–4 are never blocked.
+The raw files carry the same payments with injected defects. Cleaning them in
+Part 1b and comparing the result with the clean database and `dq_defects` is the Part 1 exercise.
 
 ## Principles
 
@@ -43,9 +43,9 @@ Part 1b and comparing the result with the warehouse and `label_dq` is the Part 1
    Both use the same engine, so a stream stopped at `t` equals a backfill to `t` (tested).
 3. **Independent RNG streams per engine** (`rng.stream(seed, name)`), so changing one engine
    does not reshuffle the others. The same seed and horizon always give the same data.
-4. **Truth is hidden.** Anomaly labels, DQ labels, true invoice allocations and the
-   statement-line → payment link live in `data/truth/` and are used only for scoring.
-5. **Dirty data lives only in the raw layer.** The ledger and warehouse are always clean.
+4. **The answer key is hidden.** Anomaly labels, DQ labels, true invoice allocations and the
+   statement-line → payment link live in `data/answer_key/` and are used only for scoring.
+5. **Dirty data lives only in the raw files.** The ledger and the clean database are always clean.
 6. **UTC everywhere.** Local business dates, cut-offs and end-of-day use each entity's
    timezone and `dim_calendar`.
 7. **Banks book in cents.** Every ledger posting is rounded, so statements reconcile exactly.
@@ -97,8 +97,8 @@ camt.054-style notifications to `--webhook`.
 
 | Layer | Where | Contents |
 |---|---|---|
-| Warehouse | `data/warehouse/treasury.sqlite` | star schema, clean |
-| Raw landing | `data/landing/{payments,invoices,payment_events,bank_statements}/` | monthly Parquet. Payments contain DQ defects |
-| Stream batches | `data/landing/stream/` | per-tick Parquet |
-| Truth | `data/truth/` | `payment_invoice`, `payment_flow`, `label_anomaly`, `label_dq`, `statement_payment` |
+| Clean database (the data warehouse) | `data/clean/treasury.sqlite` | star schema, clean |
+| Raw data | `data/raw/{payments,invoices,payment_events,bank_statements}/` | monthly Parquet. Payments contain DQ defects |
+| Stream batches | `data/raw/stream/` | per-tick Parquet |
+| Answer key | `data/answer_key/` | `payment_to_invoice`, `payment_business_flow`, `business_anomalies`, `dq_defects`, `statement_line_to_payment` |
 | ISO 20022 | `data/iso20022/` | camt.053 XML via `treasury-sim export-camt053` |

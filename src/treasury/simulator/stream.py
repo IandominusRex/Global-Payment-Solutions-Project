@@ -1,12 +1,12 @@
 """Live stream (v3): replay the simulation on a ticking clock.
 
   1. Simulate the full horizon (end_date + N days) from the seed.
-  2. Load the warehouse as of the clock's start (end of the backfill period).
+  2. Load the clean database as of the clock's start (end of the backfill period).
   3. Each tick: find every row whose visible state changed in (previous, now] and
-     push it to the sinks - warehouse upserts, Parquet micro-batches, webhooks.
+     push it to the sinks - clean-database upserts, Parquet micro-batches, webhooks.
 
 Because every tick is an as-of view of the same simulation, streaming to time t
-leaves the warehouse identical to a snapshot at t (tested).
+leaves the clean database identical to a snapshot at t (tested).
 """
 
 from __future__ import annotations
@@ -20,12 +20,19 @@ import numpy as np
 import pandas as pd
 
 from treasury.simulator import asof
-from treasury.simulator.backfill import Simulation, backfill_cut, run_simulation, snapshot, write_truth, write_warehouse
+from treasury.simulator.backfill import (
+    Simulation,
+    backfill_cut,
+    run_simulation,
+    snapshot,
+    write_answer_key,
+    write_clean_db,
+)
 from treasury.simulator.clock import SimClock
 from treasury.simulator.config import SimulationConfig
 from treasury.simulator.inject import data_quality
+from treasury.simulator.sinks.clean_db import get_engine, upsert
 from treasury.simulator.sinks.exports import refresh_exports
-from treasury.simulator.sinks.warehouse import get_engine, upsert
 from treasury.simulator.sinks.webhook import post_notifications
 
 
@@ -135,21 +142,21 @@ UPSERT_ORDER = [("dim_counterparty", ["counterparty_id"]), ("fact_fx_rate", ["da
 
 
 def run_stream(cfg: SimulationConfig, days: int | None = None, speed: float = 300.0,
-               max_ticks: int | None = None, webhook: str | None = None, landing: bool = True,
+               max_ticks: int | None = None, webhook: str | None = None, write_raw: bool = True,
                log=print) -> Simulation:
     days = days or cfg.stream.default_days
     t0 = time.perf_counter()
     sim = run_simulation(cfg, horizon_end=cfg.end_date + timedelta(days=days))
     start, end = backfill_cut(cfg), backfill_cut(cfg) + pd.Timedelta(days=days)
     ds = snapshot(sim, start, balance_date_max=cfg.end_date)
-    write_warehouse(cfg, ds.tables)
-    write_truth(cfg, snapshot(sim, end))  # truth for everything the stream will emit
+    write_clean_db(cfg, ds.tables)
+    write_answer_key(cfg, snapshot(sim, end))  # answer key for everything the stream will emit
     log(f"Simulated {days}-day horizon and loaded history as of {start} in {time.perf_counter() - t0:.0f}s")
 
     streamer = Streamer(sim)
     streamer.prime(ds.tables)
-    engine = get_engine(cfg.output.warehouse_url)
-    stream_dir = Path(cfg.output.landing_dir) / "stream"
+    engine = get_engine(cfg.output.clean_db_url)
+    stream_dir = Path(cfg.output.raw_dir) / "stream"
     clock = SimClock(start, cfg.stream.tick_sim_seconds, speed, end=end)
     try:
         for i, (prev, now) in enumerate(clock.ticks(max_ticks), start=1):
@@ -159,7 +166,7 @@ def run_stream(cfg: SimulationConfig, days: int | None = None, speed: float = 30
                     df = res.tables.get(table)
                     if df is not None and len(df):
                         upsert(conn, table, df, keys)
-            if landing:
+            if write_raw:
                 _write_micro_batch(cfg, stream_dir, res)
             if webhook:
                 post_notifications(webhook, res.tables["fact_payment_event"], res.tables["fact_payment"], log)
@@ -170,7 +177,7 @@ def run_stream(cfg: SimulationConfig, days: int | None = None, speed: float = 30
                 refresh_exports(cfg, docs=False, log=log)
     except KeyboardInterrupt:
         log(f"Stopped at simulated {clock.now}")
-    refresh_exports(cfg, docs=False, log=log)  # final state, so the workbook always matches the warehouse
+    refresh_exports(cfg, docs=False, log=log)  # final state, so the workbook always matches the clean database
     return sim
 
 

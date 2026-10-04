@@ -5,7 +5,7 @@ the project blueprint (lesson 8) and the nine analyses (lesson 8.1).
 
 **Verdict:** the design is sound and fits the project. It is event-driven (invoices lead to
 payments, which post to the ledger), it keeps an append-only event log, and it stores
-anomaly labels as hidden ground truth. Because of that, balances reconcile to payments,
+anomaly labels in a separate answer key. Because of that, balances reconcile to payments,
 and analyses 5, 8 and 9 have real signal to find.
 
 The review found **6 blocking issues** and **10 smaller gaps**. All are fixed in this repo:
@@ -17,8 +17,8 @@ order is also moved up (see the end of this page).
 | # | Issue | Why it matters | Fix in repo |
 |---|---|---|---|
 | B1 | **Entities and currencies don't agree.** It proposes 12 entities (HK, JP, VN, MY, AU…) but only 6 currencies. A VN entity pays local payroll in VND, which isn't modelled. | Either the FX exposure (7) and balances (6) are wrong, or the currency list grows past the blueprint's 5–6. | There are 11 entities, all in SG/CN/IN/DE/NL/GB/US, so every functional currency is one of the 6. VN, MY, ID, JP, AU, AE and two fictional high-risk countries are **counterparty-only** countries that settle in USD, which matches real Asian trade invoicing. The config validator enforces this. |
-| B2 | **Dirty data and ledger truth are mixed up.** DQ defects (duplicate rows, negative amounts) are listed alongside business anomalies, but there is no rule for which layer they live in. | If a re-sent-file duplicate posts to the ledger, balances stop reconciling. Analyses 5 and 6 then run on corrupted numbers, and the cleaning pipeline has no right answer to check against. | Two layers. **Business anomalies** are injected *before* the ledger, because they are real money. **DQ defects** are injected *after*, into raw landing files only. Both are labelled in `data/truth/`. |
-| B3 | **Reconciliation has no ground truth.** Statement lines and remittance quality are designed, but nothing records which invoice a payment *actually* paid. | You can compute an auto-match *rate* but not its *accuracy*. A matcher that confidently mismatches looks good. | The true payment → invoice allocation is written to `data/truth/` (see `recon/statements.py`). |
+| B2 | **Dirty data and correct ledger data are mixed up.** DQ defects (duplicate rows, negative amounts) are listed alongside business anomalies, but there is no rule for which layer they live in. | If a re-sent-file duplicate posts to the ledger, balances stop reconciling. Analyses 5 and 6 then run on corrupted numbers, and the cleaning pipeline has no right answer to check against. | Two layers. **Business anomalies** are injected *before* the ledger, because they are real money. **DQ defects** are injected *after*, into raw files only. Both are labelled in `data/answer_key/`. |
+| B3 | **Reconciliation has no answer key.** Statement lines and remittance quality are designed, but nothing records which invoice a payment *actually* paid. | You can compute an auto-match *rate* but not its *accuracy*. A matcher that confidently mismatches looks good. | The true payment → invoice allocation is written to `data/answer_key/` (see `recon/statements.py`). |
 | B4 | **Circular dependency in intercompany funding.** Funding is "triggered when a subsidiary's forecast goes short", but the forecast is what analysis 5 builds. | The data would depend on the model being evaluated, and forecast accuracy would be partly self-fulfilling. | Funding is triggered by a **rule** on projected balances (balance + scheduled AP, payroll and tax over the next N business days). |
 | B5 | **STP and repair can't be measured.** Analysis 3 needs STP rate, manual-repair share and a breakdown by cut-off. The design's `fact_payment` has no field for any of these. It also mentions a "legacy file" penalty with no channel column. | You can't compute analysis 3 KPIs from the table. | `fact_payment` gets `channel`, `is_stp`, `repair_count` and `missed_cutoff`. There is a `REPAIRED` lifecycle state and a `HELD` state for sanctions review. |
 | B6 | **One `is_business_day` per date** (blueprint `dim_date`). | 1 Oct is a holiday in CN but not in SG. Cut-offs, value dates and the forecast all need per-country business days. | `dim_calendar(date_id, country_code, is_business_day, holiday_name)` bridge table, built from the `holidays` library. |
@@ -30,7 +30,7 @@ order is also moved up (see the end of this page).
 | G1 | 18 months of backfill gives 13-week forecasting only one annual cycle, so there is no year-on-year seasonality to validate against. | `backfill_months: 24`. |
 | G2 | The "estimated benefit of pooling" (6) needs interest rates, which the design doesn't have. | `credit_rate` / `debit_rate` per account in `dim_account`, set in config. |
 | G3 | The corridor needs both ends. The blueprint only has `payer_account_id` and cannot represent incoming receipts. | `direction` (OUT/IN), `account_id` (our side), and `sender_country` / `receiver_country` stored on the row. |
-| G4 | `"SDG"` is proposed as an invalid currency code, but it is a **real ISO code** (Sudanese pound), so an ISO-4217 check would pass it. | Defects use `"usd"`, `"SGP"` and `"EUR "`. `dq_checks.check_currency_codes` validates against the *modelled* set. |
+| G4 | `"SDG"` is proposed as an invalid currency code, but it is a **real ISO code** (Sudanese pound), so an ISO-4217 check would pass it. | Defects are misspellings of the true code (`"usd"`, `"US$"`, `"EUR "`, ...), so a lookup map can undo them. `dq_checks.check_currency_codes` validates against the *modelled* set. |
 | G5 | Real bank names or BICs would make a public portfolio repo look like it used real data. | Fictional banks, with BICs in a `…ZZ` pattern. |
 | G6 | Faker company names can collide with real companies. | Acceptable for synthetic data. The README states that all names are generated. |
 | G7 | Which FX fixing does `amount_sgd` use? The design doesn't say. | The value-date fixing. Weekends carry Friday forward (`is_published_fixing = false`), so there are no gaps. |
@@ -52,8 +52,8 @@ viable" is checked by tests.
 | 5 | Forecast | `fact_balance`, `fact_invoice` (due dates), `dim_calendar` | Weekly and monthly seasonality, trend, late payers | ≥ 24 months of history. Weekly seasonality is detectable |
 | 6 | Concentration | `fact_balance`, `dim_account.is_pooled`, `overdraft_limit`, rates, `fact_sweep` | Idle INR cash while DE is overdrawn | At least one day has idle cash > overdraft in the same group |
 | 7 | FX exposure | Flows where `currency_code ≠ entity.functional_currency`, `fact_fx_rate`, `fact_fx_hedge` | Long EUR, short CNY, partially hedged | Net EUR > 0 and net CNY < 0 in SGD terms |
-| 8 | Reconciliation | `fact_statement_line`, `fact_invoice`, truth allocation | Virtual-account payers match better | Exact-reference rate, VA − free text ≥ 20 pp (v1 proxy; true match rate needs v4 statements) |
-| 9 | Anomalies | `fact_payment`, `dim_counterparty.first_seen_date`, truth labels | 8 labelled anomaly types | ≥ 100 labels per type across the backfill |
+| 8 | Reconciliation | `fact_statement_line`, `fact_invoice`, answer-key allocation | Virtual-account payers match better | Exact-reference rate, VA − free text ≥ 20 pp (v1 proxy; true match rate needs v4 statements) |
+| 9 | Anomalies | `fact_payment`, `dim_counterparty.first_seen_date`, answer-key labels | 8 labelled anomaly types | ≥ 100 labels per type across the backfill |
 
 ## v1 verification results
 
@@ -91,11 +91,11 @@ Measured on the full default backfill (seed 42, 24 months). `tests/test_analysis
 | v2 | Analysis 6 | trapped CNY (Shanghai, Shenzhen) and INR (India) cash builds up while Germany is overdrawn about 96% of days |
 | v2 | AM04 | about 180 insufficient-funds rejections, all from real balances, mostly on unscheduled payments |
 | v2 | Event trail | 3.5M events, strictly ordered per payment, and SETTLED always equals `settled_ts` |
-| v3 | Stream = snapshot | streaming tick by tick leaves the warehouse identical to a snapshot at the same time |
+| v3 | Stream = snapshot | streaming tick by tick leaves the clean database identical to a snapshot at the same time |
 | v4 | Analysis 8 | full-reference match on statement lines: virtual-account payers 100%, free-text payers about 55%. About 5k part-paid invoices and about 3k multi-invoice payments. |
 | v4 | Analysis 9 | 7 anomaly types, 250–8,400 labels each, under 3% of payments |
 | v4 | Statements | the sum of statement lines equals the ledger movement per account. camt.053 OPBD + entries = CLBD. |
-| v4 | DQ | raw files differ from the warehouse by exactly the labelled defects, and the warehouse is clean |
+| v4 | DQ | raw files differ from the clean database by exactly the labelled defects, and the clean database has none |
 
 ### What the checks caught while building v2–v4
 
@@ -120,7 +120,7 @@ full volume for the final build.
 - The event log plus current-state table (`fact_payment_event` + `fact_payment`)
 - Seeded randomness and a UTC timestamp convention
 - The ISO 20022-style reason codes, UETR, and OUR/SHA/BEN charge bearer
-- Parquet landing files as the first streaming sink (it matches the Part 1 Pandas pipeline)
+- Parquet raw files as the first streaming sink (it matches the Part 1 Pandas pipeline)
 
 ## Build order
 

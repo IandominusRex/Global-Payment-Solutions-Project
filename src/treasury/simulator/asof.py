@@ -1,4 +1,4 @@
-"""As-of views: what the warehouse shows at a given moment of simulated time.
+"""As-of views: what the clean database shows at a given moment of simulated time.
 
 The simulator computes every payment's full future (when it will settle, bounce or
 come back). A bank's data at time t only shows what has happened by t. This module

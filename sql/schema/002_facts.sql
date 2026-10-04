@@ -1,6 +1,6 @@
 -- Star schema: facts (the timestamped flow). All timestamps are UTC.
--- Hidden ground truth (anomaly labels, true invoice allocations) is NOT here:
--- it lives in data/truth/ so detection and matching code cannot peek at it.
+-- The answer key (anomaly labels, true invoice allocations) is NOT here:
+-- it lives in data/answer_key/ so detection and matching code cannot peek at it.
 
 CREATE TABLE IF NOT EXISTS fact_fx_rate (
     date_id              INTEGER NOT NULL REFERENCES dim_date(date_id),

@@ -9,7 +9,7 @@ from treasury.simulator.cli import main
 def test_build_world_loads_star_schema(tmp_path):
     raw = yaml.safe_load((ROOT / "config" / "simulation.yaml").read_text())
     db = tmp_path / "wh.sqlite"
-    raw["output"]["warehouse_url"] = f"sqlite:///{db}"
+    raw["output"]["clean_db_url"] = f"sqlite:///{db}"
     cfg_path = tmp_path / "sim.yaml"
     cfg_path.write_text(yaml.safe_dump(raw))
 

@@ -9,13 +9,13 @@ any analysis, I needed data. This entry records how I got there and one course c
   credit-card fraud data) have one flat table with a fraud flag. They lack payment rails,
   cut-off times, correspondent hops, failure reasons, bank statements, ledger balances,
   invoices, FX exposure and intercompany flows, which are the things I want to analyse.
-- A simulator also gives an **answer key**. I plant known patterns and store the truth
+- A simulator also gives an **answer key**. I plant known patterns and store the answers
   separately, so I can tell whether an analysis is finding something real or just noise.
 
 ## Design rules I set (all in `CLAUDE.md`)
 - The lifecycle computes full outcomes. "What is visible as of time T" lives in one place (`asof.py`), so backfill and live stream produce identical data.
 - Data-quality defects go into the raw layer only. Business anomalies (duplicates, structuring, bursts) are real money and post to the ledger.
-- Ground-truth labels never enter the warehouse.
+- Answer-key labels never enter the clean database.
 - Each engine has its own random stream, so changing one engine doesn't reshuffle the others.
 
 ## Build progress

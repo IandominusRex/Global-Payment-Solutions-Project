@@ -1,7 +1,7 @@
 """Orchestration: world -> events -> lifecycle -> ledger -> event log, then as-of snapshots.
 
 run_simulation() computes the full future up to a horizon. snapshot(sim, t) is what the
-warehouse shows at simulated time t. The backfill is the snapshot at the end of the last
+clean database shows at simulated time t. The backfill is the snapshot at the end of the last
 day; the live stream (stream.py) takes successive snapshots as its clock moves.
 """
 
@@ -26,8 +26,8 @@ from treasury.simulator.lifecycle import state_machine, timing
 from treasury.simulator.market import hedging
 from treasury.simulator.market.fx import build_fx_rates
 from treasury.simulator.recon import statements
+from treasury.simulator.sinks.clean_db import create_schema, get_engine, replace_rows
 from treasury.simulator.sinks.exports import refresh_exports
-from treasury.simulator.sinks.warehouse import create_schema, get_engine, replace_rows
 from treasury.simulator.world.builder import World, build_world
 from treasury.simulator.world.calendar import BusinessCalendar, build_dim_calendar, build_dim_date
 
@@ -43,8 +43,8 @@ ALL_TABLES = [*reversed(FACTS), *reversed(DIMENSIONS)]
 
 @dataclass
 class Dataset:
-    tables: dict[str, pd.DataFrame]   # warehouse tables, in load order
-    truth: dict[str, pd.DataFrame]    # hidden ground truth, never loaded
+    tables: dict[str, pd.DataFrame]   # clean-database tables, in load order
+    answer_key: dict[str, pd.DataFrame]  # the answer key, never loaded into the clean database
 
 
 @dataclass
@@ -63,7 +63,7 @@ class Simulation:
     postings: pd.DataFrame
     opening: pd.Series
     statement_lines: pd.DataFrame  # includes internal _posting_ts
-    statement_truth: pd.DataFrame
+    statement_answer_key: pd.DataFrame
     hedges: pd.DataFrame
     horizon_end: date
 
@@ -91,17 +91,17 @@ def run_simulation(cfg: SimulationConfig, horizon_end: date | None = None) -> Si
     first = payments[payments["_mirror_of"].isna()].drop_duplicates("intent_id")[["intent_id", "payment_id"]]
     allocation = alloc.merge(first, on="intent_id")[["payment_id", "invoice_id", "allocated_amount"]]
     ev = state_machine.build_events(payments, world.dim_account)
-    lines, line_truth = statements.build(led.postings, payments, world.dim_account, world.dim_entity,
+    lines, line_answer_key = statements.build(led.postings, payments, world.dim_account, world.dim_entity,
                                          world.dim_counterparty)
     hedges = hedging.build(cfg, payments, world.dim_entity, cal, fx)
     return Simulation(cfg=cfg, world=world, static=static, fx=fx, invoices=invoices, allocation=allocation,
                       payments=payments, events=ev, balances=led.balances, sweeps=led.sweeps,
                       postings=led.postings, opening=led.opening, statement_lines=lines,
-                      statement_truth=line_truth, hedges=hedges, horizon_end=horizon_end)
+                      statement_answer_key=line_answer_key, hedges=hedges, horizon_end=horizon_end)
 
 
 def snapshot(sim: Simulation, t: pd.Timestamp, balance_date_max: date | None = None) -> Dataset:
-    """Warehouse tables as they look at simulated time t (UTC).
+    """Clean-database tables as they look at simulated time t (UTC).
 
     balance_date_max also includes end-of-day snapshots up to that local date even if a
     western timezone's EOD falls a few hours after t (used by the backfill cut).
@@ -149,13 +149,14 @@ def snapshot(sim: Simulation, t: pd.Timestamp, balance_date_max: date | None = N
         "fact_fx_hedge": sim.hedges[sim.hedges["_trade_date"] <= t].drop(columns="_trade_date").reset_index(drop=True),
     })
     lines = tables["fact_statement_line"]["line_id"]
-    truth = {
-        "payment_invoice": sim.allocation[sim.allocation["payment_id"].isin(p["payment_id"])].reset_index(drop=True),
-        "payment_flow": p[["payment_id", "flow", "entity_id"]],
-        "label_anomaly": p.loc[p["anomaly_type"].notna(), ["payment_id", "anomaly_type"]].reset_index(drop=True),
-        "statement_payment": sim.statement_truth[sim.statement_truth["line_id"].isin(lines)].reset_index(drop=True),
+    answer_key = {
+        "payment_to_invoice": sim.allocation[sim.allocation["payment_id"].isin(p["payment_id"])].reset_index(drop=True),
+        "payment_business_flow": p[["payment_id", "flow", "entity_id"]],
+        "business_anomalies": p.loc[p["anomaly_type"].notna(), ["payment_id", "anomaly_type"]].reset_index(drop=True),
+        "statement_line_to_payment": sim.statement_answer_key[
+            sim.statement_answer_key["line_id"].isin(lines)].reset_index(drop=True),
     }
-    return Dataset(tables=tables, truth=truth)
+    return Dataset(tables=tables, answer_key=answer_key)
 
 
 def cut_lines(lines: pd.DataFrame, t: pd.Timestamp) -> pd.DataFrame:
@@ -179,18 +180,18 @@ def _date_id(s: pd.Series) -> pd.Series:
 
 # ---------------------------------------------------------------- sinks
 
-LANDING = {"payments": ("fact_payment", "initiated_ts"), "invoices": ("fact_invoice", "issue_date_id"),
+RAW_FEEDS = {"payments": ("fact_payment", "initiated_ts"), "invoices": ("fact_invoice", "issue_date_id"),
            "payment_events": ("fact_payment_event", "event_ts"),
            "bank_statements": ("fact_statement_line", "booking_date_id")}
 
 
-def write_landing(cfg: SimulationConfig, ds: Dataset) -> None:
+def write_raw(cfg: SimulationConfig, ds: Dataset) -> None:
     """Raw timestamped batches, one Parquet file per month, like host-to-host drops.
 
-    The payments files carry injected data-quality defects (labels in data/truth/label_dq).
+    The payments files carry injected data-quality defects (labels in data/answer_key/dq_defects).
     """
-    root = Path(cfg.output.landing_dir)
-    for name, (table, ts_col) in LANDING.items():
+    root = Path(cfg.output.raw_dir)
+    for name, (table, ts_col) in RAW_FEEDS.items():
         df = ds.tables[table]
         if table == "fact_payment":
             df = data_quality.apply(cfg, df)
@@ -202,20 +203,20 @@ def write_landing(cfg: SimulationConfig, ds: Dataset) -> None:
                else df[ts_col].astype(str).str[:4] + "-" + df[ts_col].astype(str).str[4:6])
         for month, part in df.groupby(key):
             part.to_parquet(out / f"{name}_{month}.parquet", index=False)
-    write_truth(cfg, ds)
+    write_answer_key(cfg, ds)
 
 
-def write_truth(cfg: SimulationConfig, ds: Dataset) -> None:
-    truth_dir = Path(cfg.output.truth_dir)
-    truth_dir.mkdir(parents=True, exist_ok=True)
-    for name, df in ds.truth.items():
-        df.to_parquet(truth_dir / f"{name}.parquet", index=False)
-    data_quality.label(cfg, ds.tables["fact_payment"]).to_parquet(truth_dir / "label_dq.parquet", index=False)
+def write_answer_key(cfg: SimulationConfig, ds: Dataset) -> None:
+    answer_key_dir = Path(cfg.output.answer_key_dir)
+    answer_key_dir.mkdir(parents=True, exist_ok=True)
+    for name, df in ds.answer_key.items():
+        df.to_parquet(answer_key_dir / f"{name}.parquet", index=False)
+    data_quality.label(cfg, ds.tables["fact_payment"]).to_parquet(answer_key_dir / "dq_defects.parquet", index=False)
 
 
-def write_warehouse(cfg: SimulationConfig, tables: dict[str, pd.DataFrame]) -> None:
+def write_clean_db(cfg: SimulationConfig, tables: dict[str, pd.DataFrame]) -> None:
     """Full rebuild: drop and recreate every table so schema changes always apply."""
-    engine = get_engine(cfg.output.warehouse_url)
+    engine = get_engine(cfg.output.clean_db_url)
     with engine.begin() as conn:
         for t in ALL_TABLES:
             conn.execute(text(f"DROP TABLE IF EXISTS {t}"))
@@ -229,10 +230,10 @@ def run_backfill(cfg: SimulationConfig, log=print) -> Dataset:
     t0 = time.perf_counter()
     ds = simulate(cfg)
     log(f"Simulated in {time.perf_counter() - t0:.1f}s")
-    write_landing(cfg, ds)
+    write_raw(cfg, ds)
     t1 = time.perf_counter()
-    write_warehouse(cfg, ds.tables)
-    log(f"Loaded warehouse in {time.perf_counter() - t1:.1f}s -> {cfg.output.warehouse_url}")
+    write_clean_db(cfg, ds.tables)
+    log(f"Loaded clean database in {time.perf_counter() - t1:.1f}s -> {cfg.output.clean_db_url}")
     for name, df in ds.tables.items():
         log(f"  {name:<20} {len(df):>10,} rows")
     refresh_exports(cfg, log=log)

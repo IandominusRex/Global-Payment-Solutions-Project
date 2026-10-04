@@ -2,7 +2,7 @@
 
 They are real money movements, so they go through the same lifecycle and ledger as
 everything else. Each injected payment carries `anomaly_type`, which becomes the hidden
-label table data/truth/label_anomaly.parquet (never loaded into the warehouse).
+label table data/answer_key/business_anomalies.parquet (never loaded into the clean database).
 
 Types (rates in config.anomalies, relative to the number of payment intents):
   duplicate_payment        same beneficiary and amount again, minutes later

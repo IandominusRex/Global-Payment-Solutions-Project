@@ -14,11 +14,11 @@ import time
 from datetime import date
 from pathlib import Path
 
-from treasury.simulator.backfill import build_static, run_backfill, write_warehouse
+from treasury.simulator.backfill import build_static, run_backfill, write_clean_db
 from treasury.simulator.config import load_config
+from treasury.simulator.sinks.clean_db import get_engine
 from treasury.simulator.sinks.exports import refresh_exports
 from treasury.simulator.sinks.iso20022 import export_camt053
-from treasury.simulator.sinks.warehouse import get_engine
 from treasury.simulator.stream import run_stream
 
 
@@ -26,8 +26,8 @@ def build_world_cmd(config_path: str) -> None:
     t0 = time.perf_counter()
     cfg = load_config(config_path)
     _, tables, _, _ = build_static(cfg)
-    write_warehouse(cfg, tables)  # also clears facts, so they never point at stale dimensions
-    print(f"World built in {time.perf_counter() - t0:.1f}s -> {cfg.output.warehouse_url}")
+    write_clean_db(cfg, tables)  # also clears facts, so they never point at stale dimensions
+    print(f"World built in {time.perf_counter() - t0:.1f}s -> {cfg.output.clean_db_url}")
     for name, df in tables.items():
         print(f"  {name:<20} {len(df):>8,} rows")
 
@@ -44,12 +44,12 @@ def main(argv: list[str] | None = None) -> None:
                     help="simulated seconds per real second (300 = 5 sim minutes per second; 0 = no pacing)")
     st.add_argument("--max-ticks", type=int, help="stop after this many ticks")
     st.add_argument("--webhook", help="POST camt.054-style notifications to this URL")
-    st.add_argument("--no-landing", action="store_true", help="skip Parquet micro-batches")
+    st.add_argument("--no-raw", action="store_true", help="skip Parquet micro-batches")
     ex = sub.add_parser("export-camt053", help="write an ISO 20022 camt.053 statement for one account and day")
     ex.add_argument("--account", required=True)
     ex.add_argument("--date", required=True, type=date.fromisoformat)
     ex.add_argument("--out", type=Path, help="default: data/iso20022/camt053_<account>_<date>.xml")
-    sub.add_parser("export-all", help="rebuild the Excel workbook, CSVs and dataset card from the warehouse")
+    sub.add_parser("export-all", help="rebuild the Excel workbook, CSVs and dataset card from the clean database")
     args = parser.parse_args(argv)
 
     if args.cmd == "build-world":
@@ -59,12 +59,12 @@ def main(argv: list[str] | None = None) -> None:
     elif args.cmd == "export-camt053":
         cfg = load_config(args.config)
         out = args.out or Path("data/iso20022") / f"camt053_{args.account}_{args.date:%Y%m%d}.xml"
-        print(export_camt053(get_engine(cfg.output.warehouse_url), args.account, args.date, out))
+        print(export_camt053(get_engine(cfg.output.clean_db_url), args.account, args.date, out))
     elif args.cmd == "export-all":
         refresh_exports(load_config(args.config))
     elif args.cmd == "stream":
         run_stream(load_config(args.config), days=args.days, speed=args.speed, max_ticks=args.max_ticks,
-                   webhook=args.webhook, landing=not args.no_landing)
+                   webhook=args.webhook, write_raw=not args.no_raw)
 
 
 if __name__ == "__main__":

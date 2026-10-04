@@ -1,7 +1,7 @@
 # Data model
 
-How the warehouse tables (`data_small/warehouse/treasury.sqlite`) fit together. The source of
-truth is the DDL in [`sql/schema/`](../sql/schema/); this page is the picture of it.
+How the tables in the clean database (`data_small/clean/treasury.sqlite`) fit together. The tables
+are defined in [`sql/schema/`](../sql/schema/); this page is the picture of them.
 
 It is a **star schema**:
 
@@ -168,15 +168,15 @@ Two joins you might expect **do not exist**, because finding them is the analysi
 
 | Missing link | Why | Where the answer key is |
 |---|---|---|
-| payment → invoice | In real life a receipt arrives with a reference like `INV-2291` (or a typo, or nothing), and treasury has to work out which invoice it pays. That's **reconciliation** (analysis 8). | `data_small/truth/payment_invoice.parquet` |
-| statement line → payment | The bank's statement is a separate record of the same money. Matching it back to our payments is also analysis 8. | `data_small/truth/statement_payment.parquet` |
+| payment → invoice | In real life a receipt arrives with a reference like `INV-2291` (or a typo, or nothing), and treasury has to work out which invoice it pays. That's **reconciliation** (analysis 8). | `data_small/answer_key/payment_to_invoice.parquet` |
+| statement line → payment | The bank's statement is a separate record of the same money. Matching it back to our payments is also analysis 8. | `data_small/answer_key/statement_line_to_payment.parquet` |
 
-The `truth/` files are the answer key: never join them into analysis queries, only use them to
-*score* your results afterwards.
+Never join the `answer_key/` files into analysis queries. Use them only to *score* your
+results afterwards.
 
 ## Try it
 
 Open the database in [DBeaver](https://dbeaver.io/) (New Connection → SQLite → point it at
-`data_small/warehouse/treasury.sqlite`) and run
+`data_small/clean/treasury.sqlite`) and run
 [`sql/exploration/00_first_look.sql`](../sql/exploration/00_first_look.sql). Each query
 there walks one part of this diagram.

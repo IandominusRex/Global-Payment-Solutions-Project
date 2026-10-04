@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "treasury-payments-analytics"
 version = "0.1.0"
-description = "Synthetic treasury payments simulator, warehouse, analytics and API (portfolio project)"
+description = "Synthetic treasury payments simulator, clean database, analytics and API (portfolio project)"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

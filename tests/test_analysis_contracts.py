@@ -23,7 +23,7 @@ def pay(ds):
     """External payments (intercompany legs excluded) with rail and flow attached."""
     p = ds.tables["fact_payment"]
     rails = ds.tables["dim_payment_type"].set_index("type_id")["rail"]
-    p = p.assign(rail=rails.loc[p["type_id"]].to_numpy()).merge(ds.truth["payment_flow"], on="payment_id")
+    p = p.assign(rail=rails.loc[p["type_id"]].to_numpy()).merge(ds.answer_key["payment_business_flow"], on="payment_id")
     return p[~p["is_intercompany"]]
 
 
@@ -113,11 +113,11 @@ def test_07_fx_exposure_long_eur_short_cny(ds, pay):
 
 def test_08_virtual_account_payers_reconcile_better(ds):
     """Match bank statement credits to invoices by reference, as a treasury system would."""
-    lines = ds.tables["fact_statement_line"].merge(ds.truth["statement_payment"], on="line_id")
-    flow = ds.truth["payment_flow"].set_index("payment_id")["flow"]
+    lines = ds.tables["fact_statement_line"].merge(ds.answer_key["statement_line_to_payment"], on="line_id")
+    flow = ds.answer_key["payment_business_flow"].set_index("payment_id")["flow"]
     ar = lines[(lines["bank_tx_code"] == "RCDT") & (lines["payment_id"].map(flow) == "ar_receipt")]
     refs = ds.tables["fact_invoice"].set_index("invoice_id")["invoice_ref"]
-    alloc = ds.truth["payment_invoice"]
+    alloc = ds.answer_key["payment_to_invoice"]
     true_refs = alloc.assign(ref=refs.reindex(alloc["invoice_id"]).to_numpy()).groupby("payment_id")["ref"].apply(list)
     matched = [isinstance(info, str) and all(r in info for r in true_refs.get(pid, ["<none>"]))
                for info, pid in zip(ar["remittance_info"], ar["payment_id"], strict=True)]
@@ -131,7 +131,7 @@ def test_08_virtual_account_payers_reconcile_better(ds):
 
 
 def test_09_enough_labelled_anomalies(ds):
-    labels = ds.truth["label_anomaly"]
+    labels = ds.answer_key["business_anomalies"]
     counts = labels["anomaly_type"].value_counts()
     from treasury.simulator.inject.anomalies import ANOMALY_TYPES
     assert set(counts.index) == set(ANOMALY_TYPES)

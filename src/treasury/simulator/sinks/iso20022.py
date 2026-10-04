@@ -1,4 +1,4 @@
-"""ISO 20022 camt.053 (bank-to-customer statement) export from the warehouse.
+"""ISO 20022 camt.053 (bank-to-customer statement) export from the clean database.
 
   treasury-sim export-camt053 --account A001 --date 2026-09-15
 
