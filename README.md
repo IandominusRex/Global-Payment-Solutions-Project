@@ -1038,6 +1038,451 @@ Across the 24 months the failure rate stays between 1.05% and 1.88%, with an ave
 
 ### Query 7 - Views
 
+## Analysis 5: Liquidity Forecast
+This analaysis looks at how much cash each entity and currency have over the next 13 weeks, and lets treasury fund shortfalls early instead of overdraft.
+### Query 1 - Daily closing balances per entity and currency
+fact_balance is one row per account per day. We limit it to 30 to not bloat the table.
+```SQL
+SELECT b.date_id,
+       a.entity_id,
+       a.currency_code,
+       ROUND(SUM(b.closing_balance), 2) AS closing_balance
+FROM fact_balance b
+JOIN dim_account a ON a.account_id = b.account_id
+GROUP BY b.date_id, a.entity_id, a.currency_code
+ORDER BY a.entity_id, a.currency_code, b.date_id
+LIMIT 30;
+```
+|date_id |entity_id|currency_code|closing_balance|
+|--------|---------|-------------|---------------|
+|20241001|E01      |CNY          |   -41854838.68|
+|20241002|E01      |CNY          |   -41854838.68|
+|20241003|E01      |CNY          |   -41854838.68|
+|20241004|E01      |CNY          |   -41854838.68|
+|20241005|E01      |CNY          |   -41854838.68|
+|20241006|E01      |CNY          |   -41854838.68|
+|20241007|E01      |CNY          |   -41854838.68|
+|20241008|E01      |CNY          |   -41854838.68|
+|20241009|E01      |CNY          |   -41854838.68|
+|20241010|E01      |CNY          |   -41854838.68|
+|20241011|E01      |CNY          |   -41854838.68|
+|20241012|E01      |CNY          |   -41854838.68|
+|20241013|E01      |CNY          |   -41854838.68|
+|20241014|E01      |CNY          |   -41854838.68|
+|20241015|E01      |CNY          |   -41854838.68|
+|20241016|E01      |CNY          |   -41854838.68|
+|20241017|E01      |CNY          |   -41854838.68|
+|20241018|E01      |CNY          |   -41854838.68|
+|20241019|E01      |CNY          |   -41854838.68|
+|20241020|E01      |CNY          |   -41854838.68|
+|20241021|E01      |CNY          |   -41854838.68|
+|20241022|E01      |CNY          |   -41854838.68|
+|20241023|E01      |CNY          |   -41854838.68|
+|20241024|E01      |CNY          |   -41854838.68|
+|20241025|E01      |CNY          |   -41854838.68|
+|20241026|E01      |CNY          |   -41854838.68|
+|20241027|E01      |CNY          |   -41854838.68|
+|20241028|E01      |CNY          |   -41854838.68|
+|20241029|E01      |CNY          |   -41854838.68|
+|20241030|E01      |CNY          |   -41854838.68|
+
+### Query 2 - Daily net cash flow per entity and currency
+For each entity, we aim to produce a single net cash flow (total money coming in - total money going out) using the payments table.
+```SQL
+SELECT date(p.settled_ts) AS settle_date,
+       a.entity_id,
+       a.currency_code,
+       SUM(CASE WHEN p.direction = 'IN' THEN p.amount ELSE -p.amount END) AS net_flow
+FROM fact_payment p
+JOIN dim_account a ON a.account_id = p.account_id
+WHERE p.settled_ts IS NOT NULL
+GROUP BY 1, 2, 3
+ORDER BY 2, 3, 1;
+```
+settle_date|entity_id|currency_code|net_flow           |
+-----------+---------+-------------+-------------------+
+2024-11-05 |E01      |CNY          |        -2741935.48|
+2024-11-07 |E01      |CNY          |        -4677419.35|
+2024-11-11 |E01      |CNY          |        -4677419.35|
+2024-11-18 |E01      |CNY          |        -3467741.94|
+2024-11-19 |E01      |CNY          |         -1048387.1|
+2024-11-21 |E01      |CNY          |          -80645.16|
+2024-11-22 |E01      |CNY          |         -806451.61|
+2024-11-25 |E01      |CNY          |        -2096774.19|
+2024-11-26 |E01      |CNY          |        -5161290.32|
+2024-11-28 |E01      |CNY          |         -645161.29|
+2024-12-02 |E01      |CNY          |        -4838709.68|
+2024-12-05 |E01      |CNY          |        -1693548.39|
+2024-12-09 |E01      |CNY          |        -3629032.26|
+2024-12-12 |E01      |CNY          |          -80645.16|
+2024-12-16 |E01      |CNY          |         -967741.94|
+2024-12-19 |E01      |CNY          |          -80645.16|
+2024-12-23 |E01      |CNY          |         -403225.81|
+2024-12-27 |E01      |CNY          |        -1774193.55|
+2025-01-06 |E01      |CNY          |         -483870.97|
+2025-01-07 |E01      |CNY          |         -1451612.9|
+2025-01-13 |E01      |CNY          |        -6370967.74|
+2025-01-20 |E01      |CNY          |       -21693548.38|
+2025-01-21 |E01      |CNY          |          -80645.16|
+2025-01-22 |E01      |CNY          |          -80645.16|
+2025-01-23 |E01      |CNY          |         -403225.81|
+2025-01-24 |E01      |CNY          | -8145161.290000001|
+2025-02-18 |E01      |CNY          |         -887096.77|
+2025-02-24 |E01      |CNY          |        -3790322.58|
+2025-02-25 |E01      |CNY          |          -80645.16|
+2025-03-03 |E01      |CNY          |        -2661290.32|
+2025-03-06 |E01      |CNY          |          -80645.16|
+2025-03-10 |E01      |CNY          |         -806451.61|
+2025-03-20 |E01      |CNY          |         -1048387.1|
+2025-03-21 |E01      |CNY          |        -2419354.84|
+2025-03-24 |E01      |CNY          |           -5000000|
+2025-03-27 |E01      |CNY          |          -80645.16|
+2025-03-30 |E01      |CNY          |        -3225806.45|
+2025-04-02 |E01      |CNY          |         -967741.94|
+2025-04-07 |E01      |CNY          |         -3951612.9|
+2025-04-21 |E01      |CNY          |         -967741.94|
+2025-04-24 |E01      |CNY          |        -2096774.19|
+2025-04-28 |E01      |CNY          |         -645161.29|
+2025-04-30 |E01      |CNY          |           -2500000|
+2025-05-19 |E01      |CNY          |          -80645.16|
+2025-05-26 |E01      |CNY          |        -1532258.06|
+2025-05-28 |E01      |CNY          |          -80645.16|
+2025-05-30 |E01      |CNY          |        -2661290.32|
+2025-06-05 |E01      |CNY          |          -80645.16|
+2025-06-09 |E01      |CNY          |         -3951612.9|
+2025-06-16 |E01      |CNY          |         -967741.94|
+2025-06-17 |E01      |CNY          |        -1370967.74|
+2025-06-19 |E01      |CNY          |         -161290.32|
+2025-06-20 |E01      |CNY          |         -564516.13|
+2025-06-23 |E01      |CNY          |        -1370967.74|
+2025-06-30 |E01      |CNY          |         -645161.29|
+2025-07-02 |E01      |CNY          |          -80645.16|
+2025-07-04 |E01      |CNY          |          -80645.16|
+2025-07-07 |E01      |CNY          |         -1048387.1|
+2025-07-14 |E01      |CNY          |        -2258064.52|
+2025-07-21 |E01      |CNY          |        -1532258.06|
+2025-07-24 |E01      |CNY          |          -80645.16|
+2025-07-28 |E01      |CNY          |          -80645.16|
+2025-08-04 |E01      |CNY          |          -80645.16|
+2025-08-05 |E01      |CNY          |          -80645.16|
+2025-08-08 |E01      |CNY          |        -2661290.32|
+2025-08-11 |E01      |CNY          |-4193548.3899999997|
+2025-08-12 |E01      |CNY          |          -80645.16|
+2025-08-15 |E01      |CNY          |        -1209677.42|
+2025-08-18 |E01      |CNY          |        -1693548.39|
+2025-08-25 |E01      |CNY          |          -80645.16|
+2025-08-26 |E01      |CNY          |          -80645.16|
+2025-08-28 |E01      |CNY          |          -80645.16|
+2025-09-01 |E01      |CNY          |        -1209677.42|
+2025-09-04 |E01      |CNY          |       -14596774.19|
+2025-09-05 |E01      |CNY          |        -1532258.06|
+2025-09-08 |E01      |CNY          |         -3548387.1|
+2025-09-15 |E01      |CNY          |        -2258064.52|
+2025-09-22 |E01      |CNY          |        -4435483.87|
+2025-09-25 |E01      |CNY          |        -4758064.52|
+2025-09-26 |E01      |CNY          |       -10645161.29|
+2025-09-29 |E01      |CNY          |         -1048387.1|
+2025-10-27 |E01      |CNY          |        -1693548.39|
+2025-11-10 |E01      |CNY          |           -5000000|
+2025-11-17 |E01      |CNY          |        -5241935.49|
+2025-11-24 |E01      |CNY          |         -161290.32|
+2025-12-01 |E01      |CNY          |           -2500000|
+2025-12-08 |E01      |CNY          |        -3870967.74|
+2025-12-15 |E01      |CNY          |         -161290.32|
+2025-12-18 |E01      |CNY          |          -80645.16|
+2025-12-22 |E01      |CNY          |        -5645161.29|
+2025-12-25 |E01      |CNY          |        -8870967.74|
+2026-01-12 |E01      |CNY          |        -4032258.06|
+2026-01-19 |E01      |CNY          |        -2983870.97|
+2026-01-22 |E01      |CNY          |        -2741935.48|
+2026-01-26 |E01      |CNY          |        -2338709.68|
+2026-02-09 |E01      |CNY          |-13145161.290000001|
+2026-02-10 |E01      |CNY          |        -2177419.35|
+2026-02-12 |E01      |CNY          |        -2419354.84|
+2026-02-13 |E01      |CNY          | -4677419.350000001|
+2026-03-26 |E01      |CNY          |        -3870967.74|
+2026-03-27 |E01      |CNY          |         -1451612.9|
+2026-03-30 |E01      |CNY          |        -5322580.65|
+2026-04-01 |E01      |CNY          |        -2338709.68|
+2026-04-03 |E01      |CNY          |        -4193548.39|
+2026-04-29 |E01      |CNY          |        -3064516.13|
+2026-08-10 |E01      |CNY          |        -4274193.55|
+2026-08-11 |E01      |CNY          |          -80645.16|
+2026-08-18 |E01      |CNY          |         -967741.94|
+2026-08-21 |E01      |CNY          |          -80645.16|
+2026-08-24 |E01      |CNY          |        -3467741.94|
+2026-09-07 |E01      |CNY          |        -2983870.97|
+2024-10-02 |E01      |EUR          | 489666.61000000004|
+2024-10-07 |E01      |EUR          |             -55100|
+2024-10-08 |E01      |EUR          | -598289.6599999999|
+2024-10-09 |E01      |EUR          |           672413.8|
+2024-10-10 |E01      |EUR          |         -486734.69|
+2024-10-11 |E01      |EUR          |         -165517.24|
+2024-10-15 |E01      |EUR          |         -155172.41|
+2024-10-16 |E01      |EUR          |         1094180.98|
+2024-10-17 |E01      |EUR          |         -104693.92|
+2024-10-18 |E01      |EUR          |         -144827.59|
+2024-10-21 |E01      |EUR          |         -103448.28|
+2024-10-22 |E01      |EUR          |         -610344.83|
+2024-10-23 |E01      |EUR          |           413793.1|
+2024-10-25 |E01      |EUR          |         -134482.76|
+2024-10-28 |E01      |EUR          |           20825.32|
+2024-10-29 |E01      |EUR          |         -391725.46|
+2024-10-30 |E01      |EUR          | 393103.44999999995|
+2024-11-01 |E01      |EUR          |          -486206.9|
+2024-11-04 |E01      |EUR          |          -413793.1|
+2024-11-05 |E01      |EUR          |          -278823.3|
+2024-11-06 |E01      |EUR          |          217241.38|
+2024-11-08 |E01      |EUR          |         -144827.59|
+2024-11-12 |E01      |EUR          |           18995.65|
+2024-11-13 |E01      |EUR          |         1479310.35|
+2024-11-15 |E01      |EUR          |         -201296.31|
+2024-11-18 |E01      |EUR          |         -693918.71|
+2024-11-19 |E01      |EUR          |         -898133.89|
+2024-11-20 |E01      |EUR          |          413793.11|
+2024-11-22 |E01      |EUR          |          146897.45|
+2024-11-25 |E01      |EUR          |          203166.12|
+2024-11-26 |E01      |EUR          |-323222.33999999997|
+2024-11-27 |E01      |EUR          |          852820.21|
+2024-11-28 |E01      |EUR          |         -299320.65|
+2024-12-02 |E01      |EUR          |-134482.75999999998|
+2024-12-03 |E01      |EUR          |         -849779.66|
+2024-12-04 |E01      |EUR          | 129287.06999999999|
+2024-12-05 |E01      |EUR          |           -4685.15|
+2024-12-09 |E01      |EUR          |          -39038.12|
+2024-12-10 |E01      |EUR          |         -310344.83|
+2024-12-11 |E01      |EUR          |         1417241.38|
+2024-12-13 |E01      |EUR          |         -193826.02|
+2024-12-16 |E01      |EUR          |-372413.79000000004|
+2024-12-17 |E01      |EUR          |         -941379.31|
+2024-12-18 |E01      |EUR          |           82758.62|
+2024-12-19 |E01      |EUR          |         -165517.24|
+2024-12-20 |E01      |EUR          |         -465517.24|
+2024-12-23 |E01      |EUR          |         -279310.34|
+2024-12-27 |E01      |EUR          |          -11430.32|
+2024-12-30 |E01      |EUR          |          190660.34|
+2024-12-31 |E01      |EUR          |           16816.96|
+2025-01-06 |E01      |EUR          |          -437287.3|
+2025-01-07 |E01      |EUR          |         -487687.79|
+2025-01-08 |E01      |EUR          |          588248.28|
+2025-01-09 |E01      |EUR          |         -103448.28|
+2025-01-10 |E01      |EUR          |         -362068.97|
+2025-01-13 |E01      |EUR          |         -868965.52|
+2025-01-14 |E01      |EUR          | -600818.8300000001|
+2025-01-15 |E01      |EUR          |          172503.96|
+2025-01-16 |E01      |EUR          |           64669.18|
+2025-01-17 |E01      |EUR          | 171880.34999999998|
+2025-01-20 |E01      |EUR          |         -231066.98|
+2025-01-21 |E01      |EUR          |         -444827.59|
+2025-01-22 |E01      |EUR          |          868965.51|
+2025-01-24 |E01      |EUR          |         -237931.03|
+2025-01-27 |E01      |EUR          |         -165517.24|
+2025-01-28 |E01      |EUR          |-1297020.4300000002|
+2025-01-29 |E01      |EUR          |           713793.1|
+2025-01-31 |E01      |EUR          |          -62068.97|
+2025-02-03 |E01      |EUR          |         -297316.13|
+2025-02-04 |E01      |EUR          |            -600000|
+2025-02-05 |E01      |EUR          |          351724.14|
+2025-02-07 |E01      |EUR          |         -320265.52|
+2025-02-10 |E01      |EUR          |            -300000|
+2025-02-11 |E01      |EUR          |         -740832.24|
+2025-02-12 |E01      |EUR          |          372413.79|
+2025-02-13 |E01      |EUR          |          -14047.11|
+2025-02-14 |E01      |EUR          |         -227586.21|
+2025-02-17 |E01      |EUR          |         -165517.24|
+2025-02-18 |E01      |EUR          |         -724137.93|
+2025-02-19 |E01      |EUR          | 372413.79000000004|
+2025-02-20 |E01      |EUR          |-325431.22000000003|
+2025-02-24 |E01      |EUR          |          -186206.9|
+2025-02-25 |E01      |EUR          |         -475862.07|
+2025-02-26 |E01      |EUR          |          579310.34|
+2025-02-28 |E01      |EUR          |         -434482.76|
+2025-03-03 |E01      |EUR          |         -310344.83|
+2025-03-04 |E01      |EUR          |          -294070.2|
+2025-03-05 |E01      |EUR          |          537931.03|
+2025-03-06 |E01      |EUR          |           -5320.45|
+2025-03-07 |E01      |EUR          |          -248193.1|
+
+### Query 3 - Reconciling the daily balances and the daily net cash flow
+```SQL
+WITH bal AS (
+  SELECT b.date_id, a.entity_id, a.currency_code,
+         ROUND(SUM(b.closing_balance),2) AS closing_balance
+  FROM fact_balance b JOIN dim_account a ON a.account_id = b.account_id
+  GROUP BY 1,2,3
+),
+flow AS (
+  SELECT CAST(strftime('%Y%m%d', p.settled_ts) AS INTEGER) AS date_id,
+         a.entity_id, a.currency_code,
+         ROUND(SUM(CASE WHEN p.direction='IN' THEN p.amount ELSE -p.amount END),2) AS net_flow
+  FROM fact_payment p JOIN dim_account a ON a.account_id = p.account_id
+  WHERE p.status='completed' AND p.settled_ts IS NOT NULL
+  GROUP BY 1,2,3
+)
+SELECT bal.date_id, bal.entity_id, bal.currency_code, bal.closing_balance,
+       COALESCE(flow.net_flow,0) AS net_flow,
+       ROUND(bal.closing_balance - LAG(bal.closing_balance)
+             OVER (PARTITION BY bal.entity_id, bal.currency_code ORDER BY bal.date_id), 2) AS balance_change
+FROM bal LEFT JOIN flow USING (date_id, entity_id, currency_code)
+ORDER BY entity_id, currency_code, date_id;
+```
+date_id |entity_id|currency_code|closing_balance|net_flow   |balance_change|
+--------+---------+-------------+---------------+-----------+--------------+
+20241001|E01      |CNY          |   -41854838.68|          0|              |
+20241002|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241003|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241004|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241005|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241006|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241007|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241008|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241009|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241010|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241011|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241012|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241013|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241014|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241015|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241016|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241017|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241018|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241019|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241020|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241021|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241022|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241023|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241024|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241025|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241026|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241027|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241028|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241029|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241030|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241031|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241101|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241102|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241103|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241104|E01      |CNY          |   -41854838.68|          0|           0.0|
+20241105|E01      |CNY          |   -44596774.16|-2741935.48|   -2741935.48|
+20241106|E01      |CNY          |   -44596774.16|          0|           0.0|
+20241107|E01      |CNY          |   -49274193.51|-4677419.35|   -4677419.35|
+20241108|E01      |CNY          |   -49274193.51|          0|           0.0|
+20241109|E01      |CNY          |   -49274193.51|          0|           0.0|
+20241110|E01      |CNY          |   -49274193.51|          0|           0.0|
+20241111|E01      |CNY          |   -53951612.86|-4677419.35|   -4677419.35|
+20241112|E01      |CNY          |   -53951612.86|          0|           0.0|
+20241113|E01      |CNY          |   -53951612.86|          0|           0.0|
+20241114|E01      |CNY          |   -53951612.86|          0|           0.0|
+20241115|E01      |CNY          |   -53951612.86|          0|           0.0|
+20241116|E01      |CNY          |   -53951612.86|          0|           0.0|
+20241117|E01      |CNY          |   -53951612.86|          0|           0.0|
+20241118|E01      |CNY          |    -57419354.8|-3467741.94|   -3467741.94|
+20241119|E01      |CNY          |    -58467741.9| -1048387.1|    -1048387.1|
+
+### Query 4 - Weekly series
+My CTE "daily" joins to the account dimension table to retrieve the entity_id and currency code. It then selects for the reformatted date, entity_id, currency_code, and net_flow. 
+
+Using the date dimensions table, we can easily reformat the reformatted date from the CTE to its drilled down date formats (year, week). 
+
+```SQL
+WITH daily AS (
+  SELECT CAST(strftime('%Y%m%d', p.settled_ts) AS INTEGER) AS date_id,
+         a.entity_id, a.currency_code,
+         SUM(CASE WHEN p.direction='IN' THEN p.amount ELSE -p.amount END) AS net_flow
+  FROM fact_payment p JOIN dim_account a ON a.account_id = p.account_id
+  WHERE p.status='completed' AND p.settled_ts IS NOT NULL
+  GROUP BY 1,2,3
+)
+SELECT d.year, d.week, dd.entity_id, dd.currency_code,
+       ROUND(SUM(dd.net_flow),2) AS weekly_net_flow,
+       COUNT(*) AS active_days
+FROM daily dd JOIN dim_date d ON d.date_id = dd.date_id
+GROUP BY d.year, d.week, dd.entity_id, dd.currency_code
+ORDER BY dd.entity_id, dd.currency_code, d.year, d.week;
+```
+year|week|entity_id|currency_code|weekly_net_flow|active_days|
+----+----+---------+-------------+---------------+-----------+
+2024|  45|E01      |CNY          |    -7419354.83|          2|
+2024|  46|E01      |CNY          |    -4677419.35|          1|
+2024|  47|E01      |CNY          |    -5403225.81|          4|
+2024|  48|E01      |CNY          |     -7903225.8|          3|
+2024|  49|E01      |CNY          |    -6532258.07|          2|
+2024|  50|E01      |CNY          |    -3709677.42|          2|
+2024|  51|E01      |CNY          |     -1048387.1|          2|
+2024|  52|E01      |CNY          |    -2177419.36|          2|
+2025|   2|E01      |CNY          |    -1935483.87|          2|
+2025|   3|E01      |CNY          |    -6370967.74|          1|
+2025|   4|E01      |CNY          |    -30403225.8|          5|
+2025|   8|E01      |CNY          |     -887096.77|          1|
+2025|   9|E01      |CNY          |    -3870967.74|          2|
+2025|  10|E01      |CNY          |    -2741935.48|          2|
+2025|  11|E01      |CNY          |     -806451.61|          1|
+2025|  12|E01      |CNY          |    -3467741.94|          2|
+2025|  13|E01      |CNY          |    -8306451.61|          3|
+2025|  14|E01      |CNY          |     -967741.94|          1|
+2025|  15|E01      |CNY          |     -3951612.9|          1|
+2025|  17|E01      |CNY          |    -3064516.13|          2|
+2025|  18|E01      |CNY          |    -3145161.29|          2|
+2025|  21|E01      |CNY          |      -80645.16|          1|
+2025|  22|E01      |CNY          |    -4274193.54|          3|
+2025|  23|E01      |CNY          |      -80645.16|          1|
+2025|  24|E01      |CNY          |     -3951612.9|          1|
+2025|  25|E01      |CNY          |    -3064516.13|          4|
+2025|  26|E01      |CNY          |    -1370967.74|          1|
+2025|  27|E01      |CNY          |     -806451.61|          3|
+
+### Query 5 - Seasonality trend
+This query builds on the weekly series trend and highlights the movement on every day of the week (Mon-Sun) per entity per currency code. "gross_flow" is the total moved in both directions (the activity level). "avg_gross_flow" shows the Tue/Thu peaks, and "avg_net_flow" shows the direction.
+```SQL
+WITH daily AS (
+  SELECT CAST(strftime('%Y%m%d', p.settled_ts) AS INTEGER) AS date_id,
+         a.entity_id, a.currency_code,
+         SUM(CASE WHEN p.direction='IN' THEN p.amount ELSE -p.amount END) AS net_flow,
+         SUM(p.amount) AS gross_flow
+  FROM fact_payment p JOIN dim_account a ON a.account_id = p.account_id
+  WHERE p.status='completed' AND p.settled_ts IS NOT NULL
+  GROUP BY 1,2,3
+),
+by_weekday AS (
+  SELECT d.day_of_week, dd.entity_id, dd.currency_code,
+         COUNT(*)                     AS n_days,
+         ROUND(AVG(dd.net_flow),2)    AS avg_net_flow,
+         ROUND(AVG(dd.gross_flow),2)  AS avg_gross_flow
+  FROM daily dd JOIN dim_date d ON d.date_id = dd.date_id
+  GROUP BY d.day_of_week, dd.entity_id, dd.currency_code
+)
+SELECT *
+FROM by_weekday
+ORDER BY entity_id, currency_code, day_of_week;
+```
+### Query 6 - Views
+```SQL
+DROP VIEW IF EXISTS vw_05_daily_balance;
+CREATE VIEW vw_05_daily_balance AS
+SELECT b.date_id, a.entity_id, a.currency_code,
+       ROUND(SUM(b.closing_balance), 2) AS closing_balance
+FROM fact_balance b
+JOIN dim_account a ON a.account_id = b.account_id
+GROUP BY b.date_id, a.entity_id, a.currency_code;
+
+DROP VIEW IF EXISTS vw_05_daily_net_flow;
+CREATE VIEW vw_05_daily_net_flow AS
+SELECT CAST(strftime('%Y%m%d', p.settled_ts) AS INTEGER) AS date_id,
+       a.entity_id, a.currency_code,
+       ROUND(SUM(CASE WHEN p.direction = 'IN' THEN p.amount ELSE -p.amount END), 2) AS net_flow,
+       ROUND(SUM(p.amount), 2) AS gross_flow
+FROM fact_payment p
+JOIN dim_account a ON a.account_id = p.account_id
+WHERE p.status = 'completed' AND p.settled_ts IS NOT NULL
+GROUP BY 1, 2, 3;
+```
+
+## Analysis 6: Cash Concentration
+This Group has 11 entities and 40 bank accounts in 6 currencies. Each account has its own balance, and cash could potentially be fragmented across these accounts. The group loses money from:
+1. Accounts piling up in cash that sits idle (Opportunity cost, credit rate)
+2. Accounts running short on cash (Overdrawn = high interest rate payable, debit rate)
+
+This analysis asks how much money the group wastes by letting this happen, and how much pooling will save.
 ## Layout
 
 | Path | Part | What |
