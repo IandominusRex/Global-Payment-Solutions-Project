@@ -1,0 +1,12 @@
+failure_reason,failure_description,category,n_payment_failures,pct_of_failures,cum_pct,failed_value_sgd_m
+AC01,Incorrect account number,data,430,45.7,45.7,17.33
+RR03,Missing creditor name or address (regulatory),data,181,19.3,65.0,5.72
+FF01,Invalid file format,technical,62,6.6,71.6,2.67
+RC01,Bank identifier incorrect,data,54,5.7,77.3,1.77
+AC04,Closed account number,data,48,5.1,82.4,1.38
+BE04,Missing creditor address,data,46,4.9,87.3,1.19
+AG01,Transaction forbidden,compliance,41,4.4,91.7,1.6
+RR04,Regulatory reason,compliance,23,2.4,94.1,0.83
+MS03,Reason not specified,technical,20,2.1,96.3,0.68
+CUST,Requested by customer (return),other,18,1.9,98.2,0.73
+AM04,Insufficient funds,funds,17,1.8,100.0,3.55

@@ -120,4 +120,4 @@ These are `data_small` figures.
 ## Next
 - Check whether the hedge book stopping after 2026-09-01 is a real finding or a simulation artifact.
 - Re-run Queries 4 and 5 on the full profile.
-- Analysis 8 (reconciliation).
+- Analysis 8 (anomaly detection). Reconciliation is deferred.

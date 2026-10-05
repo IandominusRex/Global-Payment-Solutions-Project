@@ -37,7 +37,9 @@ TABLE_ABOUT = {
     "fact_payment": "One row per payment: who paid whom, how much, on which rail, and how it ended.",
     "fact_payment_event": "The step-by-step history of each payment (created, submitted, settled, rejected...).",
     "fact_invoice": "Invoices the group issued (AR) or received (AP), and whether they were paid.",
-    "fact_statement_line": "The bank's own record of each movement, as on a bank statement (used for reconciliation).",
+    "fact_statement_line": (
+        "The bank's own record of each movement, as on a bank statement (kept for the deferred reconciliation)."
+    ),
     "fact_balance": "Closing balance of every account on every day.",
     "fact_sweep": "Nightly transfers that move surplus cash between accounts (cash pooling).",
     "fact_fx_hedge": "Monthly currency forward contracts that protect against exchange-rate moves.",

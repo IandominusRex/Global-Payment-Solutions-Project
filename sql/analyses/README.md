@@ -12,7 +12,9 @@ One file per analysis (lesson 8.1). Each file follows the same pattern:
 
 ## Order
 Do 01 → 04 first (aggregates and window functions), then 06 and 07 (joins across balances,
-FX and hedges), then 05, 08 and 09 (SQL builds the dataset, Python finishes the job).
+FX and hedges), then 05 and 08 (SQL builds the dataset, Python finishes the job).
+
+`deferred/` holds analyses that are out of scope for now (reconciliation). They are not numbered.
 
 ## Rules that apply everywhere
 | Rule | SQL | Why |

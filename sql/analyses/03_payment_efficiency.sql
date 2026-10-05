@@ -195,7 +195,7 @@ FROM eff
 GROUP BY rail;
 
 DROP VIEW IF EXISTS vw_03_stage_durations;
-CREATE VIEW vw_03_stage_durations AS
+CREATE VIEW vw_03_stage_durations AS          -- one row per stage, so it draws as a bar chart
 WITH ev AS (
     SELECT payment_id,
            MIN(CASE WHEN status = 'CREATED'   THEN event_ts END) AS created_ts,
@@ -204,12 +204,16 @@ WITH ev AS (
            MIN(CASE WHEN status = 'SETTLED'   THEN event_ts END) AS settled_ts
     FROM fact_payment_event
     GROUP BY payment_id
+),
+done AS (
+    SELECT * FROM ev
+    WHERE approved_ts IS NOT NULL AND submitted_ts IS NOT NULL AND settled_ts IS NOT NULL
 )
-SELECT COUNT(*) AS n,
-       ROUND(AVG((julianday(approved_ts)  - julianday(created_ts))   * 24), 1) AS created_to_approved_h,
-       ROUND(AVG((julianday(submitted_ts) - julianday(approved_ts))  * 24), 1) AS approved_to_submitted_h,
-       ROUND(AVG((julianday(settled_ts)   - julianday(submitted_ts)) * 24), 1) AS submitted_to_settled_h
-FROM ev
-WHERE approved_ts IS NOT NULL
-  AND submitted_ts IS NOT NULL
-  AND settled_ts IS NOT NULL;
+SELECT 1 AS stage_order, 'Created to approved'   AS stage, COUNT(*) AS n,
+       ROUND(AVG((julianday(approved_ts)  - julianday(created_ts))   * 24), 1) AS avg_hours FROM done
+UNION ALL
+SELECT 2, 'Approved to submitted', COUNT(*),
+       ROUND(AVG((julianday(submitted_ts) - julianday(approved_ts))  * 24), 1) FROM done
+UNION ALL
+SELECT 3, 'Submitted to settled', COUNT(*),
+       ROUND(AVG((julianday(settled_ts)   - julianday(submitted_ts)) * 24), 1) FROM done;

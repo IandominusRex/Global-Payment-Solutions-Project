@@ -46,7 +46,7 @@ def drop_duplicates(df: pd.DataFrame) -> pd.DataFrame:
          real one; the rest are the same payment sent twice by the source system.
       2. `df.drop_duplicates(subset=["payment_id"], keep="first")`.
       3. Question for your write-up: why is dropping on payment_id safe here, but dropping on
-         (counterparty, amount, date) would be dangerous? (Hint: analysis 9 has a
+         (counterparty, amount, date) would be dangerous? (Hint: analysis 8 has a
          "duplicate_payment" anomaly - a *real* second payment that did post to the ledger.)
     """
     raise NotImplementedError("clean.drop_duplicates")

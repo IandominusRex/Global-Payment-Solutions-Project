@@ -1,0 +1,4 @@
+risk_rating,n_payments,n_failed,fail_rate_pct,failed_value_sgd_m
+high,2621,112,4.3,3.99
+low,33483,398,1.2,15.98
+medium,32387,430,1.3,17.49

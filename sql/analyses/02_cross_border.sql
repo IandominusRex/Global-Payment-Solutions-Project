@@ -86,7 +86,34 @@ ORDER BY p90_hours DESC;
 
 
 -- -------------------------------------------------------------------------------------
--- Step 5 ✏️ TODO · Views
+-- Step 5 ✅ · Views
 -- -------------------------------------------------------------------------------------
--- CREATE VIEW vw_02_corridor_scorecard AS ... ;
--- CREATE VIEW vw_02_rail_scorecard AS ... ;
+-- vw_02_corridor_scorecard   one row per corridor (>= 200 payments): volume, value, speed, failures
+-- (A rail scorecard was dropped: cross-border payments use only 2 rails, so it had 2 rows.
+--  Rails are compared in vw_03_rail_timing and vw_04_failure_rail.)
+
+DROP VIEW IF EXISTS vw_02_corridor_scorecard;
+CREATE VIEW vw_02_corridor_scorecard AS
+WITH xb AS (
+    SELECT p.sender_country || ' -> ' || p.receiver_country AS corridor,
+           p.sender_country,
+           p.receiver_country,
+           p.amount_sgd,
+           (julianday(p.settled_ts) - julianday(p.initiated_ts)) * 24 AS hours_to_settle,
+           CASE WHEN p.status IN ('rejected', 'returned') THEN 1 ELSE 0 END AS is_failed
+    FROM fact_payment p
+    WHERE p.is_intercompany = 0
+      AND p.sender_country <> p.receiver_country
+      AND p.status <> 'pending'
+)
+SELECT corridor,
+       sender_country,
+       receiver_country,
+       COUNT(*)                                        AS n_payments,
+       ROUND(SUM(amount_sgd) / 1e6, 1)                 AS value_sgd_m,
+       ROUND(AVG(hours_to_settle), 1)                  AS avg_hours,
+       ROUND(100.0 * AVG(hours_to_settle > 48), 1)     AS pct_over_48h,
+       ROUND(100.0 * SUM(is_failed) / COUNT(*), 1)     AS failure_pct
+FROM xb
+GROUP BY corridor, sender_country, receiver_country
+HAVING n_payments >= 200;

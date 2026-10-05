@@ -83,7 +83,7 @@ def generate(cfg: SimulationConfig, world: World, cal: BusinessCalendar, fx: Fx,
     """Return (invoices, payment intents, allocation) for data_start..end (default end_date).
 
     allocation maps intent_id -> invoice_id(s) with the amount each payment settles;
-    it goes into the answer key for reconciliation (analysis 8).
+    it goes into the answer key for reconciliation (deferred).
     """
     gen = _Generator(cfg, world, cal, fx, end)
     ar_inv, ar_pay = gen.ar_receipts()
@@ -111,7 +111,7 @@ def _customer_payment_habits(cfg: SimulationConfig, world: World, intents: pd.Da
                              allocation: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Short payments and one-payment-many-invoices from customers without virtual accounts.
 
-    These are what make real reconciliation hard (analysis 8). Virtual-account payers pay
+    These are what make real reconciliation hard (deferred). Virtual-account payers pay
     each invoice exactly, which is the point of virtual accounts.
     """
     rng = stream(cfg.seed, "events.ar_habits")

@@ -111,7 +111,7 @@ def test_07_fx_exposure_long_eur_short_cny(ds, pay):
     assert net["CNY"] < 0
 
 
-def test_08_virtual_account_payers_reconcile_better(ds):
+def test_deferred_reconciliation_virtual_account_payers_match_better(ds):
     """Match bank statement credits to invoices by reference, as a treasury system would."""
     lines = ds.tables["fact_statement_line"].merge(ds.answer_key["statement_line_to_payment"], on="line_id")
     flow = ds.answer_key["payment_business_flow"].set_index("payment_id")["flow"]
@@ -130,7 +130,7 @@ def test_08_virtual_account_payers_reconcile_better(ds):
     assert (alloc.groupby("payment_id").size() > 1).sum() > 0
 
 
-def test_09_enough_labelled_anomalies(ds):
+def test_08_enough_labelled_anomalies(ds):
     labels = ds.answer_key["business_anomalies"]
     counts = labels["anomaly_type"].value_counts()
     from treasury.simulator.inject.anomalies import ANOMALY_TYPES

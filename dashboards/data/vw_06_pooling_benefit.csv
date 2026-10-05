@@ -1,0 +1,4 @@
+scenario,days_overdrawn,avg_overdrawn_sgd,avg_offsettable_sgd,annual_saving_sgd
+A: subsidiaries only (excl. HQ),44,8612.0,8612.0,359.0
+"B: incl. HQ, all overdraft",730,139186557.0,139031374.0,5376205.0
+"C: incl. HQ, unrestricted overdraft only",730,100398562.0,100398562.0,4171317.0

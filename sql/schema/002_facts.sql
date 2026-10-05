@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS fact_fx_rate (
     PRIMARY KEY (date_id, currency_code)
 );
 
--- [+] Invoices exist before cash moves: basis for the direct forecast (5) and reconciliation (8).
+-- [+] Invoices exist before cash moves: basis for the direct forecast (5) and the deferred reconciliation.
 CREATE TABLE IF NOT EXISTS fact_invoice (
     invoice_id        TEXT PRIMARY KEY,
     direction         TEXT NOT NULL CHECK (direction IN ('AR','AP')),
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS fact_payment (
     fees              NUMERIC NOT NULL DEFAULT 0,    -- [+]
     amount_received   NUMERIC,                       -- [+] after intermediary deductions
     purpose_code      TEXT REFERENCES dim_purpose_code(purpose_code),
-    remittance_ref    TEXT,                          -- [+] quality varies by payer (analysis 8)
+    remittance_ref    TEXT,                          -- [+] quality varies by payer (reconciliation, deferred)
     is_intercompany   BOOLEAN NOT NULL,              -- [+]
     initiated_ts      TIMESTAMP NOT NULL,
     submitted_ts      TIMESTAMP,                     -- [+]
@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS fact_sweep (              -- [+] pooling transfers (a
     sweep_type        TEXT NOT NULL CHECK (sweep_type IN ('zba','internal'))  -- nightly zero-balancing / same-entity funding
 );
 
--- [+] The bank's view (camt.053-like), deliberately separate from fact_payment (analysis 8).
+-- [+] The bank's view (camt.053-like), deliberately separate from fact_payment (reconciliation, deferred).
 CREATE TABLE IF NOT EXISTS fact_statement_line (
     line_id           TEXT PRIMARY KEY,
     account_id        TEXT NOT NULL REFERENCES dim_account(account_id),

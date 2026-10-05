@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS dim_counterparty (
     data_quality_score    NUMERIC NOT NULL,       -- [+]
     uses_virtual_account  BOOLEAN NOT NULL,       -- [+]
     home_entity_id        TEXT REFERENCES dim_entity(entity_id),  -- [+] entity it mainly trades with
-    first_seen_date       DATE                    -- [+] new-beneficiary rule (analysis 9)
+    first_seen_date       DATE                    -- [+] new-beneficiary rule (analysis 8)
 );
 
 CREATE TABLE IF NOT EXISTS dim_payment_type (

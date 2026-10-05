@@ -174,7 +174,7 @@ ORDER BY name;
 
 DROP VIEW IF EXISTS vw_06_account_position;
 CREATE VIEW vw_06_account_position AS
-SELECT a.account_id, a.entity_id, a.currency_code, a.is_pooled, c.is_restricted,
+SELECT a.account_id, a.entity_id, e.name AS entity_name, a.currency_code, a.is_pooled, c.is_restricted,
        b.date_id,
        ROUND(b.closing_balance, 0)                                                AS balance,
        ROUND(b.closing_balance * fx.rate_to_sgd, 0)                               AS balance_sgd,
@@ -184,6 +184,7 @@ SELECT a.account_id, a.entity_id, a.currency_code, a.is_pooled, c.is_restricted,
        ROUND((a.overdraft_limit + MIN(0, b.closing_balance)) * fx.rate_to_sgd, 0) AS headroom_sgd
 FROM fact_balance b
 JOIN dim_account a   ON a.account_id = b.account_id
+JOIN dim_entity e    ON e.entity_id = a.entity_id
 JOIN dim_currency c  ON c.currency_code = b.currency_code
 JOIN fact_fx_rate fx ON fx.date_id = b.date_id AND fx.currency_code = b.currency_code
 WHERE b.date_id = (SELECT MAX(date_id) FROM fact_balance);

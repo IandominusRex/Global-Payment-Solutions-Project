@@ -1,0 +1,8 @@
+rule,alerts,planted,caught,precision,recall
+rule_high_risk,2627,411,411,0.156,1.0
+rule_round,335,425,335,1.0,0.788
+rule_structuring,1424,408,402,0.282,0.985
+rule_new_bene,405,363,348,0.859,0.959
+rule_duplicate,820,408,408,0.498,1.0
+rule_burst,1057,376,270,0.255,0.718
+rule_off_hours,513,404,188,0.366,0.465

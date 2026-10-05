@@ -32,8 +32,8 @@ def test_account_structure_supports_concentration_analysis(cfg):
 def test_counterparties_cover_analysis_needs(cfg):
     cp = build_world(cfg).dim_counterparty
     assert len(cp) == cfg.counterparties.count
-    assert cp["uses_virtual_account"].any() and (~cp["uses_virtual_account"]).any()  # analysis 8
-    assert (cp["risk_rating"] == "high").sum() >= 1                                  # analysis 9
+    assert cp["uses_virtual_account"].any() and (~cp["uses_virtual_account"]).any()  # reconciliation (deferred)
+    assert (cp["risk_rating"] == "high").sum() >= 1                                  # analysis 8
     assert (cp["data_quality_score"] < 0.8).sum() >= cfg.counterparties.repeat_offender_suppliers
     assert (cp["avg_days_late"] > 0).any()                                           # analysis 5
 

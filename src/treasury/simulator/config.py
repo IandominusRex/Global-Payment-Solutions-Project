@@ -1,7 +1,7 @@
 """Typed, validated view of config/simulation.yaml.
 
 Cross-field rules live here so a bad config fails fast instead of producing
-a dataset that silently cannot support one of the nine analyses.
+a dataset that silently cannot support one of the analyses.
 """
 
 from __future__ import annotations

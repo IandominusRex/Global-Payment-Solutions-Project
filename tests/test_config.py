@@ -13,7 +13,7 @@ def test_config_loads(cfg):
     assert 5 <= len(cfg.currencies) <= 6          # blueprint: 5-6 currencies
     assert 10 <= len(cfg.entities) <= 15          # blueprint: 10-15 entities
     assert cfg.backfill_months >= 24              # analysis 5 needs a full annual cycle
-    assert cfg.high_risk_countries                # analysis 9 needs high-risk countries
+    assert cfg.high_risk_countries                # analysis 8 needs high-risk countries
 
 
 def test_entity_functional_currency_must_be_modelled():

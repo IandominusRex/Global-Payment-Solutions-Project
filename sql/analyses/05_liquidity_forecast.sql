@@ -59,9 +59,64 @@ LIMIT 30;
 
 
 -- -------------------------------------------------------------------------------------
--- Step 5 ✏️ TODO · Views for the Python notebook
+-- Step 5 ✅ · Views for the Python notebook and the dashboard
 -- -------------------------------------------------------------------------------------
--- vw_05_daily_balance, vw_05_daily_net_flow, vw_05_open_invoices_by_week
+-- vw_05_daily_balance     closing balance per day, entity and currency (own currency and SGD)
+-- vw_05_daily_net_flow    settled net and gross flow per day, entity and currency (own currency and SGD)
+-- vw_05_weekly_net_flow   the same by week (week_start = the Monday)
+-- vw_05_weekday_pattern   average net / gross flow by day of week (the payment-run rhythm)
+-- Amounts in the *_sgd columns can be summed across currencies and entities; the own-currency
+-- columns cannot (only add them up within one currency).
+-- (open invoices by due week is not built yet)
 -- In Python:  pd.read_sql("SELECT * FROM vw_05_daily_net_flow", con)
--- then: baseline = average of the same weekday over the last 8 weeks; backtest by pretending
--- "today" is 13 weeks earlier and comparing to what actually happened (MAPE, bias).
+
+DROP VIEW IF EXISTS vw_05_daily_balance;
+CREATE VIEW vw_05_daily_balance AS
+SELECT b.date_id, a.entity_id, e.name AS entity_name, a.currency_code,
+       ROUND(SUM(b.closing_balance), 2)                    AS closing_balance,
+       ROUND(SUM(b.closing_balance * fx.rate_to_sgd), 2)   AS closing_balance_sgd
+FROM fact_balance b
+JOIN dim_account a   ON a.account_id = b.account_id
+JOIN dim_entity e    ON e.entity_id = a.entity_id
+JOIN fact_fx_rate fx ON fx.date_id = b.date_id AND fx.currency_code = b.currency_code
+GROUP BY b.date_id, a.entity_id, e.name, a.currency_code;
+
+DROP VIEW IF EXISTS vw_05_daily_net_flow;
+CREATE VIEW vw_05_daily_net_flow AS
+SELECT CAST(strftime('%Y%m%d', p.settled_ts) AS INTEGER) AS date_id,
+       a.entity_id, e.name AS entity_name, a.currency_code,
+       ROUND(SUM(CASE WHEN p.direction = 'IN' THEN p.amount ELSE -p.amount END), 2)         AS net_flow,
+       ROUND(SUM(p.amount), 2)                                                              AS gross_flow,
+       ROUND(SUM(CASE WHEN p.direction = 'IN' THEN p.amount_sgd ELSE -p.amount_sgd END), 2) AS net_flow_sgd,
+       ROUND(SUM(p.amount_sgd), 2)                                                          AS gross_flow_sgd
+FROM fact_payment p
+JOIN dim_account a ON a.account_id = p.account_id
+JOIN dim_entity e  ON e.entity_id = a.entity_id
+WHERE p.status IN ('completed', 'delayed') AND p.settled_ts IS NOT NULL   -- delayed payments settle too
+GROUP BY 1, 2, 3, 4;
+
+DROP VIEW IF EXISTS vw_05_weekly_net_flow;
+CREATE VIEW vw_05_weekly_net_flow AS
+SELECT date(d.date, '-' || d.day_of_week || ' days') AS week_start,      -- day_of_week: 0 = Monday
+       f.entity_id, f.entity_name, f.currency_code,
+       ROUND(SUM(f.net_flow), 2)     AS weekly_net_flow,
+       ROUND(SUM(f.net_flow_sgd), 2) AS weekly_net_flow_sgd,
+       COUNT(*)                      AS active_days
+FROM vw_05_daily_net_flow f
+JOIN dim_date d ON d.date_id = f.date_id
+GROUP BY week_start, f.entity_id, f.entity_name, f.currency_code;
+
+DROP VIEW IF EXISTS vw_05_weekday_pattern;
+CREATE VIEW vw_05_weekday_pattern AS
+SELECT d.day_of_week,
+       CASE d.day_of_week WHEN 0 THEN 'Mon' WHEN 1 THEN 'Tue' WHEN 2 THEN 'Wed' WHEN 3 THEN 'Thu'
+                          WHEN 4 THEN 'Fri' WHEN 5 THEN 'Sat' ELSE 'Sun' END AS weekday,
+       f.entity_id, f.entity_name, f.currency_code,
+       COUNT(*)                        AS n_days,
+       ROUND(AVG(f.net_flow), 2)       AS avg_net_flow,
+       ROUND(AVG(f.gross_flow), 2)     AS avg_gross_flow,
+       ROUND(AVG(f.net_flow_sgd), 2)   AS avg_net_flow_sgd,
+       ROUND(AVG(f.gross_flow_sgd), 2) AS avg_gross_flow_sgd
+FROM vw_05_daily_net_flow f
+JOIN dim_date d ON d.date_id = f.date_id
+GROUP BY d.day_of_week, f.entity_id, f.entity_name, f.currency_code;

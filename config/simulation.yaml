@@ -80,9 +80,9 @@ accounts:
 counterparties:
   count: 500
   mix: { customer: 0.45, supplier: 0.40, employee_group: 0.05, tax_authority: 0.03, intercompany: 0.07 }
-  virtual_account_share: 0.35   # customers paying into virtual accounts -> clean references (analysis 8)
+  virtual_account_share: 0.35   # customers paying into virtual accounts -> clean references (reconciliation, deferred)
   repeat_offender_suppliers: 8  # suppliers with poor data quality -> repeat failures (analysis 4)
-  high_risk_counterparty_share: 0.03  # ~15 counterparties in high-risk countries (analysis 9)
+  high_risk_counterparty_share: 0.03  # ~15 counterparties in high-risk countries (analysis 8)
 
 volumes:
   payments_per_business_day: 1500   # group-wide target for the scheduled flows below

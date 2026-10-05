@@ -1,0 +1,5 @@
+channel,n,stp_pct,repaired_pct,missed_cutoff_pct
+API,23836,97.5,1.4,1.4
+H2H_FILE,19810,95.6,3.8,2.6
+LEGACY_FILE,14117,88.2,11.5,8.8
+PORTAL,9788,94.6,4.5,4.0

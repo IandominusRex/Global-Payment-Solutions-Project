@@ -1,0 +1,57 @@
+counterparty_id,name,counterparty_type,country,risk_rating,data_quality_score,n_payments,n_failed,fail_rate_pct,failed_value_sgd_m
+C0002,有限会社高橋情報,supplier,JP,low,0.92,606,7,1.2,0.16
+C0005,"Apte, Palla and Edwin",supplier,IN,medium,0.92,907,20,2.2,1.92
+C0007,Rörricht GmbH,supplier,DE,low,0.94,261,5,1.9,0.11
+C0012,Vogt Kambs AG,supplier,DE,low,0.62,1070,26,2.4,0.43
+C0014,"Vega, Jones and Perry",supplier,US,low,0.81,430,8,1.9,0.77
+C0018,Summers-Byrd,supplier,SG,low,0.95,576,5,0.9,0.52
+C0037,Eigenwillig GbR,supplier,DE,low,0.55,161,7,4.3,0.23
+C0038,创亿传媒有限公司,supplier,CN,medium,0.94,606,8,1.3,0.2
+C0050,Taylor-Morgan,supplier,GB,low,0.89,572,11,1.9,0.22
+C0056,天开传媒有限公司,supplier,CN,medium,0.8,1047,24,2.3,0.4
+C0062,Jones Group,supplier,ID,medium,0.99,1054,5,0.5,0.11
+C0073,Barry Ltd,supplier,US,low,0.9,529,8,1.5,0.37
+C0074,联软传媒有限公司,supplier,CN,medium,0.72,168,7,4.2,0.3
+C0075,Harrison-Grimes,supplier,XB,high,0.92,1608,63,3.9,3.05
+C0080,Robinson and Sons,supplier,SG,low,0.88,131,5,3.8,0.16
+C0081,Proctor-Hernandez,supplier,SG,low,0.88,670,15,2.2,0.66
+C0091,Sem-Mann,supplier,IN,medium,0.83,238,8,3.4,0.17
+C0113,Ray-Myers,customer,XB,high,0.85,42,7,16.7,0.19
+C0114,Harrison LLC,supplier,VN,medium,0.76,843,39,4.6,2.54
+C0116,"Hernandez, James and Fry",customer,XB,high,0.77,49,11,22.4,0.12
+C0120,"Gordon, Jones and Allen",supplier,GB,low,0.84,2056,40,1.9,0.89
+C0122,Garcia and Sons,supplier,MY,low,0.99,430,6,1.4,0.17
+C0123,"Shere, Chad and Raval",supplier,IN,medium,0.93,878,6,0.7,0.46
+C0133,雨林木风计算机传媒有限公司,supplier,CN,medium,0.82,1853,47,2.5,2.09
+C0134,Heidrich GmbH,supplier,DE,low,0.87,7059,86,1.2,2.48
+C0137,诺依曼软件传媒有限公司,supplier,CN,medium,0.97,5978,24,0.4,1.21
+C0138,开发区世创科技有限公司,supplier,CN,medium,0.94,997,10,1.0,0.17
+C0140,Stadelmann GbR,supplier,DE,low,0.94,751,6,0.8,0.27
+C0145,Hornig,supplier,DE,low,0.96,1759,11,0.6,0.41
+C0146,Stevens and Sons,supplier,GB,low,0.72,339,10,2.9,0.29
+C0153,网新恒天网络有限公司,supplier,CN,medium,0.83,249,6,2.4,0.39
+C0154,Bumb-Srinivas,supplier,IN,medium,0.92,486,9,1.9,0.48
+C0158,立信电子科技有限公司,supplier,CN,medium,0.95,907,5,0.6,0.05
+C0161,戴硕电子科技有限公司,supplier,CN,medium,0.57,435,28,6.4,0.36
+C0169,浙大万朋信息有限公司,supplier,CN,medium,1.0,2444,8,0.3,0.27
+C0171,泰麒麟网络有限公司,supplier,CN,medium,0.87,277,7,2.5,0.14
+C0172,超艺传媒有限公司,supplier,CN,medium,0.93,2034,17,0.8,0.36
+C0174,"Phillips, Bishop and Blair",supplier,US,low,0.81,148,5,3.4,0.06
+C0175,飞利信科技有限公司,supplier,CN,medium,0.93,1320,9,0.7,0.2
+C0178,"Ferguson, White and Butler",supplier,XB,high,0.97,505,12,2.4,0.23
+C0179,Cook-Smith,customer,XA,high,0.76,43,9,20.9,0.29
+C0181,Textor Weiß GmbH & Co. OHG,supplier,DE,low,0.93,1412,6,0.4,0.08
+C0186,"Miller, Bryant and Gonzales",supplier,SG,low,0.68,219,13,5.9,0.45
+C0187,易动力科技有限公司,supplier,CN,medium,0.82,1404,42,3.0,1.73
+C0189,和泰传媒有限公司,supplier,CN,medium,1.0,821,7,0.9,0.11
+C0196,Eberth Atzler GmbH & Co. KG,supplier,DE,low,0.75,348,14,4.0,0.5
+C0204,Sant PLC,supplier,IN,medium,0.85,244,7,2.9,0.25
+C0209,"Smith, Thompson and Contreras",supplier,VN,medium,0.82,349,13,3.7,0.43
+C0210,Bera-Borah,supplier,IN,medium,0.89,285,11,3.9,0.45
+C0226,"Thompson, Perez and Garcia",supplier,SG,low,0.82,354,6,1.7,1.17
+C0229,Raghavan Inc,supplier,IN,medium,0.77,68,10,14.7,0.12
+C0241,Jackson Inc,supplier,AU,low,0.94,349,7,2.0,0.37
+C0243,Wilmsen GmbH,supplier,DE,low,0.68,622,28,4.5,2.19
+C0245,海创科技有限公司,supplier,CN,medium,0.79,837,20,2.4,0.84
+C0247,Marquez-Castaneda,supplier,US,low,0.88,649,5,0.8,0.17
+C0249,快讯网络有限公司,supplier,CN,medium,0.8,522,8,1.5,0.28

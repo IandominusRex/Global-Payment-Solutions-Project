@@ -229,7 +229,7 @@ WITH asof AS (                        -- latest day the hedge book is live, capp
                      (SELECT CAST(strftime('%Y%m%d', MAX(settled_ts)) AS INTEGER) FROM fact_payment)) AS id) m
 ),
 fx_flows AS (
-    SELECT e.entity_id, e.functional_currency, p.currency_code,
+    SELECT e.entity_id, e.name AS entity_name, e.functional_currency, p.currency_code,
            CASE WHEN p.direction = 'IN' THEN p.amount_sgd ELSE -p.amount_sgd END AS signed_sgd
     FROM fact_payment p
     JOIN dim_account a ON a.account_id = p.account_id
@@ -240,12 +240,12 @@ fx_flows AS (
       AND date(p.settled_ts) >  date((SELECT d FROM asof), '-90 days')
       AND date(p.settled_ts) <= (SELECT d FROM asof)
 )
-SELECT f.entity_id, f.functional_currency, f.currency_code,
+SELECT f.entity_id, f.entity_name, f.functional_currency, f.currency_code,
        (SELECT d_id FROM asof)                                  AS as_of_date_id,
        ROUND(SUM(f.signed_sgd), 0)                              AS net_sgd,
        CASE WHEN SUM(f.signed_sgd) >= 0 THEN 'LONG' ELSE 'SHORT' END AS position
 FROM fx_flows f
-GROUP BY f.entity_id, f.functional_currency, f.currency_code;
+GROUP BY f.entity_id, f.entity_name, f.functional_currency, f.currency_code;
 
 DROP VIEW IF EXISTS vw_07_sensitivity;
 CREATE VIEW vw_07_sensitivity AS
@@ -282,7 +282,7 @@ hedged AS (
     WHERE l.currency_code <> e.functional_currency
     GROUP BY l.entity_id, l.currency_code
 )
-SELECT n.entity_id, n.functional_currency, n.currency_code, n.as_of_date_id,
+SELECT n.entity_id, n.entity_name, n.functional_currency, n.currency_code, n.as_of_date_id,
        n.net_sgd,
        ROUND(COALESCE(h.hedge_sgd, 0), 0)                                AS hedge_sgd,
        ROUND(-COALESCE(h.hedge_sgd, 0) / NULLIF(n.net_sgd, 0), 4)        AS hedged_pct

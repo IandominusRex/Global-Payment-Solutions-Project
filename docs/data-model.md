@@ -168,8 +168,8 @@ Two joins you might expect **do not exist**, because finding them is the analysi
 
 | Missing link | Why | Where the answer key is |
 |---|---|---|
-| payment → invoice | In real life a receipt arrives with a reference like `INV-2291` (or a typo, or nothing), and treasury has to work out which invoice it pays. That's **reconciliation** (analysis 8). | `data_small/answer_key/payment_to_invoice.parquet` |
-| statement line → payment | The bank's statement is a separate record of the same money. Matching it back to our payments is also analysis 8. | `data_small/answer_key/statement_line_to_payment.parquet` |
+| payment → invoice | In real life a receipt arrives with a reference like `INV-2291` (or a typo, or nothing), and treasury has to work out which invoice it pays. That's **reconciliation**, which this project has deferred. | `data_small/answer_key/payment_to_invoice.parquet` |
+| statement line → payment | The bank's statement is a separate record of the same money. Matching it back to our payments is also reconciliation (deferred). | `data_small/answer_key/statement_line_to_payment.parquet` |
 
 Never join the `answer_key/` files into analysis queries. Use them only to *score* your
 results afterwards.

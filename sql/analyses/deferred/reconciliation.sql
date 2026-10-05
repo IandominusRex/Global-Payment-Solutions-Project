@@ -1,5 +1,6 @@
 -- =====================================================================================
--- 08 · Reconciliation (SQL matches, Python scores)
+-- Deferred · Reconciliation (SQL matches, Python scores)
+-- Not part of the current scope: kept here for later, not numbered and not built.
 -- =====================================================================================
 -- Question : how many incoming payments match an expected invoice automatically?
 -- Metrics  : auto-match rate; unmatched value; ageing of unmatched items; match rate by reference
@@ -63,10 +64,10 @@ LIMIT 20;
 -- -------------------------------------------------------------------------------------
 -- Step 5 ✏️ TODO · The match table + unmatched ageing
 -- -------------------------------------------------------------------------------------
--- UNION the rules into one table: payment_id, invoice_id, match_rule. Save as vw_08_matches.
+-- UNION the rules into one table: payment_id, invoice_id, match_rule. Save as vw_recon_matches.
 -- Unmatched receipts: days since received -> buckets 0-7, 8-30, 31-90, 90+; sum value per bucket.
 --
--- Then in Python: compare vw_08_matches with answer_key/payment_to_invoice.parquet.
+-- Then in Python: compare vw_recon_matches with answer_key/payment_to_invoice.parquet.
 --   match rate = how many you matched;  ACCURACY = how many of those were the right invoice.
 -- A matcher that confidently matches the wrong invoice is worse than one that leaves it unmatched.
 --

@@ -1,6 +1,6 @@
 """Bank statement layer (v4): camt.053-like lines, the bank's view of every posting.
 
-Deliberately separate from fact_payment (the ERP's view). Reconciliation (analysis 8)
+Deliberately separate from fact_payment (the ERP's view). Reconciliation (deferred)
 means matching the two, and the bank's formatting is what makes that hard:
   - references are cut to the rail's field length (BACS 18, GIRO 35, ACH 80, others 140)
   - counterparty names arrive uppercased and truncated

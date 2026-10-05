@@ -1,0 +1,4 @@
+stage_order,stage,n,avg_hours
+1,Created to approved,34156,1.4
+2,Approved to submitted,34156,0.2
+3,Submitted to settled,34156,16.1

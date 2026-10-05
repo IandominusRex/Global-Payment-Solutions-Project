@@ -94,11 +94,63 @@ SELECT * FROM base LIMIT 20;
 
 
 -- -------------------------------------------------------------------------------------
--- Step 6 ✏️ TODO · Save as views for the dashboard
+-- Step 6 ✅ · Save as views for the dashboard (one view per chart)
 -- -------------------------------------------------------------------------------------
--- DROP VIEW IF EXISTS vw_01_corridor;
--- CREATE VIEW vw_01_corridor AS
---   WITH base AS (...) SELECT ... ;        -- one view per chart: currency, corridor, entity, monthly
---
 -- Views store the QUERY, not the result: they re-run each time, so they stay current when
 -- new data arrives (including live stream mode).
+-- vw_01_currency   value and count per currency
+-- vw_01_corridor   cross-border corridors by value (all corridors; the dashboard takes the top N);
+--                  sender / receiver country are separate columns so a map can use them
+-- vw_01_entity     inflow / outflow / net per entity
+-- vw_01_monthly    monthly value, inflow, outflow and net (SGD m)
+
+DROP VIEW IF EXISTS vw_01_currency;
+CREATE VIEW vw_01_currency AS
+SELECT p.currency_code,
+       COUNT(*)                          AS n_payments,
+       ROUND(SUM(p.amount_sgd) / 1e6, 1) AS value_sgd_m
+FROM fact_payment p
+WHERE p.is_intercompany = 0
+  AND p.status IN ('completed', 'delayed')
+GROUP BY p.currency_code;
+
+DROP VIEW IF EXISTS vw_01_corridor;
+CREATE VIEW vw_01_corridor AS
+SELECT p.sender_country || ' -> ' || p.receiver_country AS corridor,
+       p.sender_country,
+       p.receiver_country,
+       COUNT(*)                          AS n_payments,
+       ROUND(SUM(p.amount_sgd) / 1e6, 1) AS value_sgd_m
+FROM fact_payment p
+WHERE p.is_intercompany = 0
+  AND p.status IN ('completed', 'delayed')
+  AND p.sender_country <> p.receiver_country
+GROUP BY p.sender_country, p.receiver_country;
+
+DROP VIEW IF EXISTS vw_01_entity;
+CREATE VIEW vw_01_entity AS
+SELECT e.entity_id,
+       e.name AS entity_name,
+       ROUND(SUM(CASE WHEN p.direction = 'IN'  THEN p.amount_sgd ELSE 0 END), 2) AS inflow_sgd,
+       ROUND(SUM(CASE WHEN p.direction = 'OUT' THEN p.amount_sgd ELSE 0 END), 2) AS outflow_sgd,
+       ROUND(SUM(CASE WHEN p.direction = 'IN' THEN p.amount_sgd ELSE -p.amount_sgd END), 2) AS net_inflow_sgd
+FROM fact_payment p
+JOIN dim_account a ON a.account_id = p.account_id
+JOIN dim_entity  e ON e.entity_id  = a.entity_id
+WHERE p.is_intercompany = 0
+  AND p.status IN ('completed', 'delayed')
+GROUP BY e.entity_id, e.name;
+
+DROP VIEW IF EXISTS vw_01_monthly;
+CREATE VIEW vw_01_monthly AS
+SELECT strftime('%Y-%m', p.initiated_ts)    AS month,
+       date(p.initiated_ts, 'start of month') AS month_start,      -- a real date: Tableau needs one for a time axis
+       COUNT(*)                          AS n_payments,
+       ROUND(SUM(p.amount_sgd) / 1e6, 1) AS value_sgd_m,
+       ROUND(SUM(CASE WHEN p.direction = 'IN'  THEN p.amount_sgd ELSE 0 END) / 1e6, 1) AS inflow_sgd_m,
+       ROUND(SUM(CASE WHEN p.direction = 'OUT' THEN p.amount_sgd ELSE 0 END) / 1e6, 1) AS outflow_sgd_m,
+       ROUND(SUM(CASE WHEN p.direction = 'IN' THEN p.amount_sgd ELSE -p.amount_sgd END) / 1e6, 1) AS net_inflow_sgd_m
+FROM fact_payment p
+WHERE p.is_intercompany = 0
+  AND p.status IN ('completed', 'delayed')
+GROUP BY month;

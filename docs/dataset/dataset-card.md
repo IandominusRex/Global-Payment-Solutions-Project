@@ -73,7 +73,7 @@ kept out of the clean database, in `data_small/answer_key/`, so analysis code ca
 | [`fact_invoice`](#fact_invoice) | 68916 | Invoices the group issued (AR) or received (AP), and whether they were paid. |
 | [`fact_payment`](#fact_payment) | 106206 | One row per payment: who paid whom, how much, on which rail, and how it ended. |
 | [`fact_payment_event`](#fact_payment_event) | 446535 | The step-by-step history of each payment (created, submitted, settled, rejected...). |
-| [`fact_statement_line`](#fact_statement_line) | 148120 | The bank's own record of each movement, as on a bank statement (used for reconciliation). |
+| [`fact_statement_line`](#fact_statement_line) | 148120 | The bank's own record of each movement, as on a bank statement (kept for the deferred reconciliation). |
 | [`fact_sweep`](#fact_sweep) | 5954 | Nightly transfers that move surplus cash between accounts (cash pooling). |
 
 ## Table details
@@ -186,7 +186,7 @@ Customers, suppliers, payroll groups, tax authorities and sister companies. **63
 | data_quality_score | numeric | How clean their payment references are (0-1) |
 | uses_virtual_account | boolean | True if they pay into a virtual account (clean references) |
 | home_entity_id | text | entity it mainly trades with |
-| first_seen_date | date | new-beneficiary rule (analysis 9) |
+| first_seen_date | date | new-beneficiary rule (analysis 8) |
 
 </details>
 
@@ -564,7 +564,7 @@ One row per payment: who paid whom, how much, on which rail, and how it ended. *
 | fees | numeric | Bank fees charged |
 | amount_received | numeric | after intermediary deductions |
 | purpose_code | text | Why the money moved (joins to dim_purpose_code) |
-| remittance_ref | text | quality varies by payer (analysis 8) |
+| remittance_ref | text | quality varies by payer (reconciliation, deferred) |
 | is_intercompany | boolean | True if between two group companies |
 | initiated_ts | timestamp | When the payment was created (UTC) |
 | submitted_ts | timestamp | When it was sent to the bank (UTC) |
@@ -647,7 +647,7 @@ The step-by-step history of each payment (created, submitted, settled, rejected.
 </details>
 ### `fact_statement_line`
 
-The bank's own record of each movement, as on a bank statement (used for reconciliation). **148,120 rows, 11 columns.** [Open a 50-row sample](samples/fact_statement_line.csv)
+The bank's own record of each movement, as on a bank statement (kept for the deferred reconciliation). **148,120 rows, 11 columns.** [Open a 50-row sample](samples/fact_statement_line.csv)
 
 <details><summary>Columns</summary>
 
