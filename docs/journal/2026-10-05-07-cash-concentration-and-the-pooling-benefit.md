@@ -58,3 +58,66 @@ These are `data_small` figures and gross of the cost of running a pool.
 - Re-run Query 4 on the full profile.
 - Step 2 (fragmentation, top 3 accounts' share of cash) is still open in the SQL file.
 - Analysis 7 (FX exposure).
+
+---
+
+# Continued · FX exposure and the hedged share (Analysis 7)
+
+## Problem
+Analysis 7 asks which foreign currencies the group is long or short, by how much, and how much of that
+is covered by forwards. The first hedged share query returned 0% for every position, and the roll-up
+returned one row of nonsense.
+
+## What I did
+1. **Query 1, flows in a currency foreign to the entity.** Join `fact_payment` to `dim_account` and
+   `dim_entity` and keep `currency_code <> functional_currency`. Exposure belongs to the entity, not the
+   account, because the same EUR account is exposed for an SGD entity and not for a EUR one. `signed_sgd`
+   is `+` for IN (long) and `-` for OUT (short).
+2. **Query 2, net position** by currency, then by entity and currency (all-time).
+3. **Query 3, value at risk.** `ABS(net) x 5%` and `x 10%` on the last 90 days of flows.
+4. **Query 4, hedged share by entity and currency.** Live forwards are split into a buy leg and a sell leg,
+   converted to SGD at the as-of rate and set against the 90-day net position.
+5. **Query 5, the same rolled up to currency.**
+6. **Query 6, three views:** `vw_07_net_position`, `vw_07_sensitivity` and `vw_07_hedged_share`. Tested on a
+   copy of the database. The SQL file `sql/analyses/07_fx_exposure.sql` now has Steps 2-5.
+
+## Decisions
+- **Build exposure and hedges in separate CTEs, then join the totals.** Joining payments straight to
+  hedges repeats every payment once per hedge of that entity and inflates the sums.
+- **A hedge counts only if it is live on the as-of date:** `trade_date_id <= d < maturity_date_id`. Both
+  columns are `yyyymmdd` integers, so no join to `dim_date` is needed.
+- **Hedged share = `-hedge / exposure`.** Positive when the hedge opposes the position, negative when it
+  points the wrong way, above 1 when over-hedged.
+- **Sum amounts, then recompute the percentage.** Percentages are never added up.
+- **Keep the entity table and add the currency roll-up.** The roll-up is the headline, but the entity
+  table is where the action is: E02, E10 and E09 hold 56% of the gross exposure.
+- **The window ends on the as-of date,** so flows and hedges are measured on the same day.
+- **Pin 2026-09-15 in the README queries; the views pick the date themselves** (the last forward trade
+  date, capped at the last payment, which is 2026-09-01 here). The numbers differ slightly and the README
+  says so.
+- **Did not work out a "hedge ratio at which hedging pays".** It needs forward points, a risk tolerance
+  and forecast exposure, none of which is in the dataset.
+
+## What went wrong
+- **Everything came back 0% hedged.** The as-of date was the latest payment (2026-10-01), but the last
+  forward matures on 2026-09-30, so no hedge was live. The SQL was fine; the date was the problem.
+- **The 90-day window had no upper bound.** With the date pinned to 2026-09-15, flows to 2026-10-01 were
+  still counted. Found while testing the views, fixed in Queries 4 and 5 and both tables regenerated
+  (E01 CNY went from -4.6 to -4.2).
+- **SQL slips again.** A final `SELECT` that grouped by currency but left `net_sgd` unaggregated, so SQLite
+  returned one entity's values (it showed E01's) for each currency. A roll-up with no `GROUP BY` and
+  `SUM(hedged_pct)`. A `WITH` with no final `SELECT`. A broken `dim_date` join with typos in the alias.
+- **A test copy of the database was missing the hedge rows,** because `cp` skipped the write-ahead log.
+  `sqlite3 ... ".backup"` copies it properly.
+
+## Result
+On 2026-09-15 the group is long USD (S$45.6m), long EUR (S$20.2m) and short CNY (S$31.1m), and only
+10-18% of each position is covered. About S$17m of S$110m gross exposure (16%) is hedged. No position is
+hedged the wrong way, so the issue is coverage. USD is the largest open position (roughly S$39m). For USD
+and CNY, entities hold the same side, so netting between them removes little and forwards are the lever.
+These are `data_small` figures.
+
+## Next
+- Check whether the hedge book stopping after 2026-09-01 is a real finding or a simulation artifact.
+- Re-run Queries 4 and 5 on the full profile.
+- Analysis 8 (reconciliation).

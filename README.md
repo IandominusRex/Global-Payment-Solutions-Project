@@ -1848,6 +1848,441 @@ FROM cost
 GROUP BY name;
 ```
 
+## Analysis 7: fx_exposure
+This analysis investigates which currencies we are long or short, by how much, and how much is hedged. We can find this by finding the net positions by an account's non-functional currency. 
+
+For example, a EUR payment is only FX EXPOSURE for an entity whose home (functional) currency is NOT EUR. Germany GmbH paying in EUR has no exposure, but SG Operations receiving EUR does.
+
+From this investigation, we can decide where a forward contract or netting (combining multiple financial positions, payments, or obligations between parties to calculate a single net amount).
+
+### Query 1 - Flows to an entity that is foreign to a currency
+FX exposure is a property of the entity, not of the account it owns (exposure is defined relative to the entity's home functional currency). Direction = 'IN' equates to long (positive), while 'OUT' equates to short (negative). 
+```SQL
+WITH fx_flows AS (
+    SELECT p.payment_id,
+           e.entity_id,
+           e.functional_currency,
+           p.currency_code,
+           date(p.settled_ts) AS settle_date,
+           CASE WHEN p.direction = 'IN' THEN p.amount     ELSE -p.amount     END AS signed_amount,
+           CASE WHEN p.direction = 'IN' THEN p.amount_sgd ELSE -p.amount_sgd END AS signed_sgd
+    FROM fact_payment p
+    JOIN dim_account a ON a.account_id = p.account_id
+    JOIN dim_entity  e ON e.entity_id  = a.entity_id
+    WHERE p.is_intercompany = 0
+      AND p.status IN ('completed', 'delayed')
+      AND p.currency_code <> e.functional_currency
+)
+SELECT * FROM fx_flows LIMIT 20;
+```
+payment_id|entity_id|functional_currency|currency_code|settle_date|signed_amount|signed_sgd|
+----------+---------+-------------------+-------------+-----------+-------------+----------+
+P00008586 |E01      |SGD                |USD          |2024-10-01 |    -12007.92| -16141.12|
+P00008587 |E02      |SGD                |GBP          |2024-10-01 |     -10739.7| -18108.73|
+P00008589 |E02      |SGD                |CNY          |2024-10-08 |   -338958.55| -62650.39|
+P00008590 |E02      |SGD                |CNY          |2024-10-08 |    -13108.55|  -2422.88|
+P00008591 |E02      |SGD                |EUR          |2024-10-01 |    -44787.32| -66776.24|
+P00008592 |E02      |SGD                |CNY          |2024-10-08 |     -6806.08|  -1257.98|
+P00008593 |E02      |SGD                |CNY          |2024-10-08 |    -13826.62|   -2555.6|
+P00008594 |E01      |SGD                |USD          |2024-10-01 |     -8207.42| -11032.46|
+P00008596 |E04      |CNY                |SGD          |2024-10-08 |     27027.47|  27027.47|
+P00008597 |E02      |SGD                |CNY          |2024-10-08 |    -29258.49|  -5407.91|
+P00008598 |E07      |EUR                |USD          |2024-10-01 |      7059.55|   9489.49|
+P00008599 |E04      |CNY                |SGD          |2024-10-08 |     44207.27|  44207.27|
+P00008614 |E04      |CNY                |USD          |2024-10-08 |      55421.3|  73895.44|
+P00008633 |E02      |SGD                |CNY          |2024-10-09 |     -40142.4|  -7414.18|
+P00008635 |E06      |EUR                |CNY          |2024-10-09 |    -10178.54|  -1879.95|
+P00008637 |E06      |EUR                |CNY          |2024-10-08 |   -126030.28| -23294.43|
+P00008639 |E02      |SGD                |CNY          |2024-10-08 |     -40142.4|   -7419.6|
+P00008642 |E06      |EUR                |USD          |2024-10-01 |     -2560.05|  -3441.23|
+P00008643 |E06      |EUR                |GBP          |2024-10-01 |   -115497.73|-194746.38|
+P00008646 |E07      |EUR                |GBP          |2024-10-01 |      -9421.6| -15886.22|
+
+### Query 2 - Net position by currency and entity
+GROUP BY currency:
+```SQL
+WITH fx_flows AS (
+    SELECT p.payment_id,
+           e.entity_id,
+           e.functional_currency,
+           p.currency_code,
+           date(p.settled_ts) AS settle_date,
+           CASE WHEN p.direction = 'IN' THEN p.amount     ELSE -p.amount     END AS signed_amount,
+           CASE WHEN p.direction = 'IN' THEN p.amount_sgd ELSE -p.amount_sgd END AS signed_sgd
+    FROM fact_payment p
+    JOIN dim_account a ON a.account_id = p.account_id
+    JOIN dim_entity  e ON e.entity_id  = a.entity_id
+    WHERE p.is_intercompany = 0
+      AND p.status IN ('completed', 'delayed')
+      AND p.currency_code <> e.functional_currency
+)
+SELECT currency_code, ROUND(SUM(signed_sgd)/1e6, 1) AS net_sgd_m
+FROM fx_flows
+GROUP BY currency_code;
+```
+currency_code|net_sgd_m|
+-------------+---------+
+CNY          |   -238.2|
+EUR          |    126.1|
+GBP          |     -6.6|
+SGD          |     53.1|
+USD          |    342.4|
+
+The group is long EUR 126.1m SGD, USD 342.4m SGD and short CNY 238.2m SGD
+
+If we drill down into each entity, we get a more detailed table. We limit to 21 to see the first 5 entities.
+```SQL
+WITH fx_flows AS (
+    SELECT p.payment_id,
+           e.entity_id,
+           e.functional_currency,
+           p.currency_code,
+           date(p.settled_ts) AS settle_date,
+           CASE WHEN p.direction = 'IN' THEN p.amount     ELSE -p.amount     END AS signed_amount,
+           CASE WHEN p.direction = 'IN' THEN p.amount_sgd ELSE -p.amount_sgd END AS signed_sgd
+    FROM fact_payment p
+    JOIN dim_account a ON a.account_id = p.account_id
+    JOIN dim_entity  e ON e.entity_id  = a.entity_id
+    WHERE p.is_intercompany = 0
+      AND p.status IN ('completed', 'delayed')
+      AND p.currency_code <> e.functional_currency
+)
+SELECT entity_id, functional_currency, currency_code, ROUND(SUM(signed_sgd)/1e6, 1) AS net_sgd_m
+FROM fx_flows
+GROUP BY entity_id, currency_code
+LIMIT 21;
+```
+entity_id|functional_currency|currency_code|net_sgd_m|
+---------+-------------------+-------------+---------+
+E01      |SGD                |CNY          |    -20.7|
+E01      |SGD                |EUR          |      7.4|
+E01      |SGD                |GBP          |      0.2|
+E01      |SGD                |USD          |      8.9|
+E02      |SGD                |CNY          |    -85.8|
+E02      |SGD                |EUR          |     57.0|
+E02      |SGD                |GBP          |      0.1|
+E02      |SGD                |USD          |     70.7|
+E03      |CNY                |EUR          |     -3.6|
+E03      |CNY                |GBP          |     -0.4|
+E03      |CNY                |SGD          |      0.9|
+E03      |CNY                |USD          |     10.2|
+E04      |CNY                |EUR          |     -6.6|
+E04      |CNY                |GBP          |     -4.0|
+E04      |CNY                |SGD          |      8.1|
+E04      |CNY                |USD          |     35.4|
+E05      |INR                |CNY          |     -5.1|
+E05      |INR                |EUR          |      1.7|
+E05      |INR                |GBP          |      0.2|
+E05      |INR                |SGD          |      2.9|
+E05      |INR                |USD          |     39.6|
+
+### Query 3 - Value at risk from a currency move
+We use a 90 day window to see the impact of loss if the currency moves 5% and 10%.
+
+```SQL
+WITH fx_flows AS (
+    SELECT p.payment_id,
+           e.entity_id,
+           e.functional_currency,
+           p.currency_code,
+           date(p.settled_ts) AS settle_date,
+           CASE WHEN p.direction = 'IN' THEN p.amount     ELSE -p.amount     END AS signed_amount,
+           CASE WHEN p.direction = 'IN' THEN p.amount_sgd ELSE -p.amount_sgd END AS signed_sgd
+    FROM fact_payment p
+    JOIN dim_account a ON a.account_id = p.account_id
+    JOIN dim_entity  e ON e.entity_id  = a.entity_id
+    WHERE p.is_intercompany = 0
+      AND p.status IN ('completed', 'delayed')
+      AND p.currency_code <> e.functional_currency
+      AND p.settled_ts >= date((SELECT MAX(settled_ts) FROM fact_payment), '-90 days')
+)
+SELECT currency_code,
+	   ROUND(ABS(SUM(signed_sgd)) / 1e6, 1)       AS exposure_sgd_m,
+       ROUND(ABS(SUM(signed_sgd)) * 0.05 / 1e6, 2) AS loss_5pct_m,
+       ROUND(ABS(SUM(signed_sgd)) * 0.10 / 1e6, 2) AS loss_10pct_m
+FROM fx_flows
+GROUP BY currency_code
+;
+```
+currency_code|exposure_sgd_m|loss_5pct_m|loss_10pct_m|
+-------------+--------------+-----------+------------+
+CNY          |          29.3|       1.47|        2.93|
+EUR          |          19.2|       0.96|        1.92|
+GBP          |           1.8|       0.09|        0.18|
+SGD          |           6.1|        0.3|        0.61|
+USD          |          45.4|       2.27|        4.54|
+
+### Query 4 - Hedged share
+We have the table fact_fx_hedge, and we can measure how much of the exposure the group already has that is covered by live forwards. A forward is live on a date if it has been traded and has not yet matured, so the query needs a reference date. We use 2026-09-15 and measure the exposure over the 90 days up to it.
+```SQL
+    WITH asof AS (  -- Creating the reference date
+    SELECT '2026-09-15' AS d, 20260915 AS d_id
+),
+fx_flows AS ( -- Foreign currency flows 
+    SELECT e.entity_id, e.functional_currency, p.currency_code,
+           CASE WHEN p.direction = 'IN' THEN p.amount_sgd ELSE -p.amount_sgd END AS signed_sgd
+    FROM fact_payment p
+    JOIN dim_account a ON a.account_id = p.account_id
+    JOIN dim_entity  e ON e.entity_id  = a.entity_id
+    WHERE p.is_intercompany = 0
+      AND p.status IN ('completed', 'delayed')
+      AND p.currency_code <> e.functional_currency
+      AND date(p.settled_ts) > date((SELECT d FROM asof), '-90 days')
+      AND date(p.settled_ts) <= (SELECT d FROM asof)
+),
+exposure AS (
+    SELECT entity_id, currency_code, SUM(signed_sgd) AS net_sgd
+    FROM fx_flows
+    GROUP BY entity_id, currency_code
+),
+hedge_legs AS (                       -- one row per leg of each LIVE forward
+    SELECT h.entity_id, h.buy_currency AS currency_code, h.buy_amount AS signed_amount
+    FROM fact_fx_hedge h, asof
+    WHERE h.trade_date_id <= asof.d_id AND asof.d_id < h.maturity_date_id
+    UNION ALL
+    SELECT h.entity_id, h.sell_currency, -h.sell_amount
+    FROM fact_fx_hedge h, asof
+    WHERE h.trade_date_id <= asof.d_id AND asof.d_id < h.maturity_date_id
+),
+hedged AS (
+    SELECT l.entity_id, l.currency_code,
+           SUM(l.signed_amount * r.rate_to_sgd) AS hedge_sgd
+    FROM hedge_legs l
+    JOIN dim_entity  e ON e.entity_id = l.entity_id
+    JOIN asof          ON 1 = 1
+    JOIN fact_fx_rate r ON r.currency_code = l.currency_code AND r.date_id = asof.d_id
+    WHERE l.currency_code <> e.functional_currency
+    GROUP BY l.entity_id, l.currency_code
+)
+SELECT x.entity_id, x.currency_code,
+       ROUND(x.net_sgd / 1e6, 1)                       AS net_sgd_m,
+       ROUND(COALESCE(h.hedge_sgd, 0) / 1e6, 1)        AS hedge_sgd_m,
+       ROUND(-COALESCE(h.hedge_sgd, 0) / x.net_sgd, 2) AS hedged_pct
+FROM exposure x
+LEFT JOIN hedged h ON h.entity_id = x.entity_id AND h.currency_code = x.currency_code
+ORDER BY x.entity_id, x.currency_code;
+```
+entity_id|currency_code|net_sgd_m|hedge_sgd_m|hedged_pct|
+---------+-------------+---------+-----------+----------+
+E01      |CNY          |     -4.2|        0.6|      0.15|
+E01      |EUR          |      1.2|        0.0|       0.0|
+E01      |GBP          |      0.0|        0.0|       0.0|
+E01      |USD          |      1.7|        0.0|       0.0|
+E02      |CNY          |    -11.6|        2.1|      0.18|
+E02      |EUR          |      6.3|       -1.6|      0.26|
+E02      |GBP          |     -0.1|        0.0|       0.0|
+E02      |USD          |      9.6|       -1.8|      0.18|
+E03      |EUR          |     -0.8|        0.0|       0.0|
+E03      |GBP          |     -0.2|        0.0|       0.0|
+E03      |SGD          |      0.1|        0.0|       0.0|
+E03      |USD          |      3.5|       -1.2|      0.34|
+E04      |EUR          |     -0.6|        0.0|       0.0|
+E04      |GBP          |     -0.6|        0.0|       0.0|
+E04      |SGD          |      1.6|        0.0|       0.0|
+E04      |USD          |      2.0|        0.0|       0.0|
+E05      |CNY          |     -0.4|        0.0|       0.0|
+E05      |EUR          |      0.3|        0.0|       0.0|
+E05      |GBP          |     -0.1|        0.0|       0.0|
+E05      |SGD          |     -0.2|        0.0|       0.0|
+E05      |USD          |      5.4|       -0.8|      0.14|
+E06      |CNY          |     -1.6|        0.4|      0.27|
+E06      |GBP          |     -2.0|        0.4|      0.23|
+E06      |SGD          |      1.2|       -0.3|      0.24|
+E06      |USD          |      4.3|        0.0|       0.0|
+E07      |CNY          |     -0.5|        0.0|       0.0|
+E07      |GBP          |      0.2|        0.0|       0.0|
+E07      |SGD          |      0.3|        0.0|       0.0|
+E07      |USD          |      2.6|        0.0|       0.0|
+E08      |CNY          |     -1.1|        0.0|       0.0|
+E08      |GBP          |     -0.1|        0.0|       0.0|
+E08      |SGD          |      0.2|        0.0|       0.0|
+E08      |USD          |      7.0|       -0.7|       0.1|
+E09      |CNY          |     -1.8|        0.3|      0.17|
+E09      |EUR          |      2.9|       -0.8|      0.28|
+E09      |SGD          |      2.3|       -0.3|      0.15|
+E09      |USD          |      9.6|       -2.7|      0.28|
+E10      |CNY          |     -8.3|        2.0|      0.24|
+E10      |EUR          |      8.5|       -1.1|      0.14|
+E10      |GBP          |      0.6|        0.0|       0.0|
+E10      |SGD          |      0.5|        0.0|       0.0|
+E11      |CNY          |     -1.5|        0.3|      0.21|
+E11      |EUR          |      2.4|        0.0|       0.0|
+E11      |GBP          |     -0.1|        0.0|       0.0|
+E11      |SGD          |      0.1|        0.0|       0.0|
+
+### Query 5 - Hedged share by currency code
+```SQL
+    WITH asof AS (  -- Creating the reference date
+    SELECT '2026-09-15' AS d, 20260915 AS d_id
+),
+fx_flows AS ( -- Foreign currency flows 
+    SELECT e.entity_id, e.functional_currency, p.currency_code,
+           CASE WHEN p.direction = 'IN' THEN p.amount_sgd ELSE -p.amount_sgd END AS signed_sgd
+    FROM fact_payment p
+    JOIN dim_account a ON a.account_id = p.account_id
+    JOIN dim_entity  e ON e.entity_id  = a.entity_id
+    WHERE p.is_intercompany = 0
+      AND p.status IN ('completed', 'delayed')
+      AND p.currency_code <> e.functional_currency
+      AND date(p.settled_ts) > date((SELECT d FROM asof), '-90 days')
+      AND date(p.settled_ts) <= (SELECT d FROM asof)
+),
+exposure AS (
+    SELECT entity_id, currency_code, SUM(signed_sgd) AS net_sgd
+    FROM fx_flows
+    GROUP BY entity_id, currency_code
+),
+hedge_legs AS (                       -- one row per leg of each LIVE forward
+    SELECT h.entity_id, h.buy_currency AS currency_code, h.buy_amount AS signed_amount
+    FROM fact_fx_hedge h, asof
+    WHERE h.trade_date_id <= asof.d_id AND asof.d_id < h.maturity_date_id
+    UNION ALL
+    SELECT h.entity_id, h.sell_currency, -h.sell_amount
+    FROM fact_fx_hedge h, asof
+    WHERE h.trade_date_id <= asof.d_id AND asof.d_id < h.maturity_date_id
+),
+hedged AS (
+    SELECT l.entity_id, l.currency_code,
+           SUM(l.signed_amount * r.rate_to_sgd) AS hedge_sgd
+    FROM hedge_legs l
+    JOIN dim_entity  e ON e.entity_id = l.entity_id
+    JOIN asof          ON 1 = 1
+    JOIN fact_fx_rate r ON r.currency_code = l.currency_code AND r.date_id = asof.d_id
+    WHERE l.currency_code <> e.functional_currency
+    GROUP BY l.entity_id, l.currency_code
+),
+hedged_by_entity_currency AS (
+    SELECT x.entity_id, x.currency_code,
+           x.net_sgd,
+           COALESCE(h.hedge_sgd, 0) AS hedge_sgd
+    FROM exposure x
+    LEFT JOIN hedged h ON h.entity_id = x.entity_id AND h.currency_code = x.currency_code
+)
+SELECT currency_code,
+       ROUND(SUM(net_sgd) / 1e6, 1)             AS total_net_sgd_m,
+       ROUND(SUM(hedge_sgd) / 1e6, 1)           AS total_hedged_sgd_m,
+       ROUND(-SUM(hedge_sgd) / SUM(net_sgd), 2) AS total_hedged_pct
+FROM hedged_by_entity_currency
+GROUP BY currency_code;
+```
+
+currency_code|total_net_sgd_m|total_hedged_sgd_m|total_hedged_pct|
+-------------+---------------+------------------+----------------+
+CNY          |          -31.1|               5.7|            0.18|
+EUR          |           20.2|              -3.6|            0.18|
+GBP          |           -2.5|               0.4|            0.18|
+SGD          |            6.2|              -0.6|             0.1|
+USD          |           45.6|              -7.0|            0.15|
+
+**Result.** On 2026-09-15 the group is long USD (S$45.6m), long EUR (S$20.2m) and short CNY (S$31.1m) over the last 90 days of flows, and only 10-18% of each position is covered by live forwards. Across all entities, about S$17m of S$110m gross exposure (16%) is hedged. The group is partially hedged, with no currency at 0% or at 100%.
+
+- **USD is the biggest gap.** Long S$45.6m and 15% hedged, so roughly S$39m is open. A 5% fall in USD costs about S$2.3m, more than any other currency. CNY (short S$31.1m, 18% hedged) and EUR (long S$20.2m, 18% hedged) follow.
+- **The hedges point the right way.** Of the 25 entity and currency positions above S$1m, none is hedged in the wrong direction and none is over-hedged. The problem is coverage, not mistakes. Eight positions have no hedge at all (S$16.9m of S$104.2m gross).
+- **Exposure is concentrated.** E02, E10 and E09 hold S$61.9m of the S$110.3m gross (56%). E02 alone is S$27.6m, with CNY, USD and EUR each only 18-26% hedged. E08 is long S$7.0m USD with 10% cover.
+- **Netting across entities will not remove much.** Net and gross are almost the same for USD (S$45.6m both) and CNY (S$31.1m both), because entities hold the same side. Only EUR (net 20.2, gross 23.1) and GBP (net -2.5, gross 3.9) have some offset, so for USD and CNY forwards are the lever, not intercompany netting.
+
+**So what.** Add forwards where the open exposure is largest: sell USD forward at E02, E09 and E08, and buy CNY forward at E02 and E10.
+
+**Assumptions and limits.**
+- The date 2026-09-15 is pinned because a hedge only counts if it is live on that date. The last forward was traded on 2026-09-01 and matures on 2026-09-30, so on the last payment date (2026-10-01) no hedge is live and every position shows 0%. Whether the hedge book stopping there is a real finding or an artifact of the simulation has not been checked.
+- Exposure is settled payments in the 90 days up to the as-of date, not forecast receivables and payables. The window ends on the as-of date so that flows and hedges are measured on the same day.
+- The data does not link a forward to the payments it covers, so cover is matched on entity and currency only. Maturities are not matched to when the exposure falls due.
+- Hedge notionals are converted at the as-of spot rate, not at the forward rate.
+- The roll-up adds positions across entities with different functional currencies. For example, the SGD row is the view of the non-SGD entities. The entity table is the more accurate one.
+- The 5% and 10% figures are a simple shock on the net position, not a statistical value at risk.
+- I did not work out the hedge ratio at which hedging pays. That needs the cost of the forward (forward points against spot), a risk tolerance and forecast exposure, none of which is in the dataset.
+- These are `data_small` numbers. The full profile may differ.
+
+### Query 6 - Views
+
+Three views save the results above for the dashboards. `vw_07_net_position` is the net position per entity and currency over the 90 days to the as-of date (with a `LONG` or `SHORT` flag for the waterfall chart), `vw_07_sensitivity` is the 5% and 10% loss per currency, and `vw_07_hedged_share` adds the live hedge and the hedged share to each entity and currency.
+
+Unlike Queries 4 and 5, the views do not pin a date. They use the latest day on which the hedge book is live (the last forward trade date, capped at the last payment). On this data that is 2026-09-01, so the numbers differ slightly from the tables above. Amounts are in SGD.
+
+```SQL
+DROP VIEW IF EXISTS vw_07_net_position;
+CREATE VIEW vw_07_net_position AS
+WITH asof AS (                        -- latest day the hedge book is live, capped at the last payment
+    SELECT m.id AS d_id,
+           date(substr(m.id, 1, 4) || '-' || substr(m.id, 5, 2) || '-' || substr(m.id, 7, 2)) AS d
+    FROM (SELECT MIN((SELECT MAX(trade_date_id) FROM fact_fx_hedge),
+                     (SELECT CAST(strftime('%Y%m%d', MAX(settled_ts)) AS INTEGER) FROM fact_payment)) AS id) m
+),
+fx_flows AS (
+    SELECT e.entity_id, e.functional_currency, p.currency_code,
+           CASE WHEN p.direction = 'IN' THEN p.amount_sgd ELSE -p.amount_sgd END AS signed_sgd
+    FROM fact_payment p
+    JOIN dim_account a ON a.account_id = p.account_id
+    JOIN dim_entity  e ON e.entity_id  = a.entity_id
+    WHERE p.is_intercompany = 0
+      AND p.status IN ('completed', 'delayed')
+      AND p.currency_code <> e.functional_currency
+      AND date(p.settled_ts) >  date((SELECT d FROM asof), '-90 days')
+      AND date(p.settled_ts) <= (SELECT d FROM asof)
+)
+SELECT f.entity_id, f.functional_currency, f.currency_code,
+       (SELECT d_id FROM asof)                                  AS as_of_date_id,
+       ROUND(SUM(f.signed_sgd), 0)                              AS net_sgd,
+       CASE WHEN SUM(f.signed_sgd) >= 0 THEN 'LONG' ELSE 'SHORT' END AS position
+FROM fx_flows f
+GROUP BY f.entity_id, f.functional_currency, f.currency_code;
+
+DROP VIEW IF EXISTS vw_07_sensitivity;
+CREATE VIEW vw_07_sensitivity AS
+SELECT currency_code,
+       as_of_date_id,
+       ROUND(SUM(net_sgd), 0)              AS net_sgd,
+       ROUND(ABS(SUM(net_sgd)), 0)         AS exposure_sgd,
+       ROUND(ABS(SUM(net_sgd)) * 0.05, 0)  AS loss_5pct_sgd,
+       ROUND(ABS(SUM(net_sgd)) * 0.10, 0)  AS loss_10pct_sgd
+FROM vw_07_net_position
+GROUP BY currency_code, as_of_date_id;
+
+DROP VIEW IF EXISTS vw_07_hedged_share;
+CREATE VIEW vw_07_hedged_share AS
+WITH asof AS (
+    SELECT MAX(as_of_date_id) AS d_id FROM vw_07_net_position
+),
+hedge_legs AS (                       -- one row per leg of each LIVE forward
+    SELECT h.entity_id, h.buy_currency AS currency_code, h.buy_amount AS signed_amount
+    FROM fact_fx_hedge h, asof
+    WHERE h.trade_date_id <= asof.d_id AND asof.d_id < h.maturity_date_id
+    UNION ALL
+    SELECT h.entity_id, h.sell_currency, -h.sell_amount
+    FROM fact_fx_hedge h, asof
+    WHERE h.trade_date_id <= asof.d_id AND asof.d_id < h.maturity_date_id
+),
+hedged AS (
+    SELECT l.entity_id, l.currency_code,
+           SUM(l.signed_amount * r.rate_to_sgd) AS hedge_sgd
+    FROM hedge_legs l
+    JOIN dim_entity  e ON e.entity_id = l.entity_id
+    JOIN asof          ON 1 = 1
+    JOIN fact_fx_rate r ON r.currency_code = l.currency_code AND r.date_id = asof.d_id
+    WHERE l.currency_code <> e.functional_currency
+    GROUP BY l.entity_id, l.currency_code
+)
+SELECT n.entity_id, n.functional_currency, n.currency_code, n.as_of_date_id,
+       n.net_sgd,
+       ROUND(COALESCE(h.hedge_sgd, 0), 0)                                AS hedge_sgd,
+       ROUND(-COALESCE(h.hedge_sgd, 0) / NULLIF(n.net_sgd, 0), 4)        AS hedged_pct
+FROM vw_07_net_position n
+LEFT JOIN hedged h ON h.entity_id = n.entity_id AND h.currency_code = n.currency_code;
+```
+
+Result of `SELECT * FROM vw_07_sensitivity` (as of 2026-09-01):
+
+| currency_code | net_sgd | exposure_sgd | loss_5pct_sgd | loss_10pct_sgd |
+|---|---|---|---|---|
+| USD | 46,552,694 | 46,552,694 | 2,327,635 | 4,655,269 |
+| CNY | -32,096,840 | 32,096,840 | 1,604,842 | 3,209,684 |
+| EUR | 18,826,112 | 18,826,112 | 941,306 | 1,882,611 |
+| SGD | 5,132,818 | 5,132,818 | 256,641 | 513,282 |
+| GBP | -1,785,868 | 1,785,868 | 89,293 | 178,587 |
+
+## Analysis 8: reconciliation
+### Query 1 - 
+
 ## Layout
 
 | Path | Part | What |
