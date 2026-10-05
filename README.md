@@ -12,12 +12,12 @@ Picture one fictional company, **Group Treasury HQ in Singapore**, that owns ten
 | Term | Plain meaning | Example from the data |
 |---|---|---|
 | **11 entities** | The separate legal companies inside the group. Each has its own bank accounts, home currency and local rules. One (the HQ) also acts as the group's *in-house bank*, lending cash to the others. | `E03` **Shanghai Mfg**, a factory in China that earns and pays in yuan (CNY), and `E06` **Germany GmbH**, which pays in euros. |
-| **About 50 accounts** (48) | Bank accounts held by those entities at fictional banks. Each has a currency, a target balance the treasury wants to keep, and sometimes an overdraft limit. Some are *pooled*: any surplus is swept to a header account every night. | `A004` is SG Operations' main SGD account at *Merlion Global Bank* (a made-up bank). |
+| ** 48 accounts** | Bank accounts held by those entities at fictional banks. Each has a currency, a target balance the treasury wants to keep, and sometimes an overdraft limit. Some are *pooled*: any surplus is swept to a header account every night. | `A004` is SG Operations' main SGD account at *Merlion Global Bank* (a made-up bank). |
 | **6 currencies** | SGD, USD, EUR, GBP, CNY, INR. The group reports in SGD, so every payment also carries its SGD value. CNY and INR are *restricted*: cash can't move freely in or out of China and India. | A payment of 10,739.70 GBP is stored as S$18,108.73 at that day's exchange rate. |
 | **Payment rails** | The "roads" money travels on. Which road you use decides how fast it arrives, what it costs and how often it fails. | See the three types below. |
 
 **Domestic rails** move money *within one country or region*. They are cheap and reliable, but many
-run in batches with a daily **cut-off time**: miss it and the payment waits until the next business day.
+run in batches with a daily **cut-off time**. If it is missed, the payment waits until the next business day.
 Examples: `GIRO` (Singapore, next day), `ACH` (US), `SEPA_CT` (Europe), `BACS` (UK), `NEFT` (India), `CNAPS` (China).
 
 **Instant rails** settle in seconds, at any hour, but usually cap the amount.
@@ -34,10 +34,11 @@ the most (about 3.6% for SWIFT against under 2% for most domestic rails). Exampl
 Two more, for completeness: `CARD` (corporate card spend, settles in about 2 days) and
 `BOOK_TRANSFER` (between accounts at the same bank, instant).
 
-**How the core tables connect.** Each of our companies owns accounts. Every payment runs between
+### **Visualizing how the tables connect using an ER diagram.** 
+Each of our companies owns accounts. Every payment runs between
 one of our accounts and a counterparty, and it carries a step-by-step event history. Invoices say
 what *should* be paid, payments say what *was* paid, and bank statements are the bank's own record.
-Matching those three is a reconciliation problem, which this project has deferred, so there is deliberately no direct join between them.
+Matching those three is a reconciliation problem. I deferred this as I felt this would overcomplicated my analysis, so there is deliberately no direct join between them.
 
 ```mermaid
 erDiagram
@@ -52,12 +53,10 @@ erDiagram
     dim_account ||--o{ fact_statement_line : "bank's record"
 ```
 
-The full diagram, with key columns and the reasoning behind each link, is in
+The full diagram with key columns and the reasoning behind each link is in
 [docs/data-model.md](docs/data-model.md).
 
-**Preview the data without running anything:** see the [dataset card](docs/dataset/dataset-card.md)
-(summary statistics, every column explained, one example record per table) and the
-[sample CSVs](docs/dataset/samples/), which GitHub shows as tables.
+>**Preview the data without running anything:** see the [dataset card](docs/dataset/dataset-card.md) (summary statistics, every column explained, one example record per table) and the [sample CSVs](docs/dataset/samples/) shown as tables.
 
 ## Where the data lives
 
@@ -70,20 +69,16 @@ Every build writes four folders, into `data_small/` (small profile) or `data/` (
 | `answer_key/` | What the simulator planted: which rows are defective, which payments are anomalies, which invoice each payment paid. Also called *ground truth*. | Yes. It lists the answers | Only scoring code, **never** analysis code |
 | `exports/` | Excel and CSV copies of `clean/`, for browsing. | Yes | You |
 
-## Why this project exists
+## Why this project?
 
 I wanted hands-on practice with the problems a payments and treasury team deals with every
 day: where money moves, why payments fail, how fast they settle, where cash sits idle, how
 FX exposure builds up, and which transactions look wrong.
 
-**The problem: there is no public dataset that fits.** Real payment data is confidential,
-and the public datasets I found don't cover what I need (for example, PaySim and
-credit-card fraud sets have fraud labels but no rails, cut-offs, correspondent hops,
-bank statements, balances or intercompany flows). What I need is a linked set of payment
-lifecycle events, bank statements, ledger balances, invoices and FX, with known answers to
-check my analysis against.
+> **The problem: there is no public dataset that fits.** Real payment data is confidential,and the public datasets I found don't cover what I need (for example, PaySim and credit-card fraud sets have fraud labels but no rails, cut-offs, correspondent hops, bank statements, balances or intercompany flows). What I need is a linked set of payment lifecycle events, bank statements, ledger balances, invoices and FX, with known answers to check my analysis against.
 
-**So I built the data first.** The simulator (built with claude) models how the business works (invoices,
+### Harness the power of Claude...
+I used Claude Code to build me a simulator, which models how the business works (invoices,
 payroll, tax, intercompany funding), pushes that through payment rails with realistic
 timing, cut-offs, failures and fees, and posts it to a ledger. Then it deliberately plants
 the patterns each analysis should find (a slow corridor, a legacy-file channel with worse
@@ -91,19 +86,10 @@ straight-through processing, repeat-offender suppliers, an entity that drains in
 overdraft while another sits on idle cash) and records the answer key separately in
 `data/answer_key/`. 
 
-Data-quality defects go only into the raw data, so the cleaning pipeline has real work to do. That gives me an answer key: I can check whether my SQL and models find what I planted.
-
-## Documentation trail
-
-This repo is documented as I go, so the reasoning is visible, not just the result.
-
-- [docs/journal/](docs/journal/) has dated entries: what I did, why, what went wrong, what I changed.
-- [docs/data-model.md](docs/data-model.md) is the ER diagram: how the tables join, and which links are missing on purpose.
-- [docs/dataset-design-review.md](docs/dataset-design-review.md) maps each analysis to the fields it needs.
-- [docs/architecture.md](docs/architecture.md) describes the system design.
-- Commit history is kept small and descriptive, one step per commit.
+Data-quality defects go only into the raw data, so the cleaning pipeline has real work to do. That gives me an answer key, which I can check whether my SQL and models find what Claude planted.
 
 ## Quick start
+The script below gets the project running on your machine and generates the fake payments data, if you would like to try and simulate the data yourself :)
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
@@ -124,13 +110,22 @@ pytest                            # add -m "not contract" to skip the ~1 min ful
 
 # Step 1: Exploring the dirty data (done, cleaning pipeline skipped)
 The simulator deliberately created 3 things.
-1. It created "Clean", which includes
-2. It created "Raw", which includes all the data rows + defects. 
-3. It created "answer_key", which highlights the defects
+1. **Clean** (`clean/treasury.sqlite`): the correct version of every table. This is the data warehouse the analyses use.
+2. **Raw** (`raw/`): the same payments as monthly Parquet files, with planted data-quality defects, as if received from a bank.
+3. **answer_key**: a list of exactly which rows were planted as defects, kept separate so it can be used for checking only.
 
 I did not build the cleaning pipeline. This project is about payments analytics, not data cleaning, so I stop at finding the defects and start the analysis from "Clean".
 
-I explored "Raw" first in `notebooks/01_explore_raw_data.ipynb`, and found 6 defects:
+## What I did in the notebook
+📓 **[`notebooks/01_explore_raw_data.ipynb`](notebooks/01_explore_raw_data.ipynb)** (open it on GitHub to read it with all its outputs). The goal was to find every kind of dirty data in "Raw".
+
+1. **Loaded** the 25 monthly payment files into one table (106,621 rows, each tagged with its source file).
+2. **First look:** column types, sample rows and how many values are missing per column. Ten columns had nulls, but missing is not always wrong (for example `uetr` is only set on cross-border payments).
+3. **Tested every null against its business rule.** For each of the ten columns I wrote down when it should be filled (e.g. `batch_id` only on batch rails, `settled_ts` only once a payment has settled) and counted the rows that broke the rule. Only `purpose_code` was a real null defect. This also showed that 516 missing `fx_rate_applied` values were a side effect of the misspelled currency codes, not a separate defect.
+4. **Hunted the defects one by one** (table below). For each I noted what is wrong, whether it can be fixed with certainty, and which one-line check would catch it.
+5. **Checked every fix against the clean database** before trusting it, for example that each misspelled country maps to exactly one real country.
+6. **Swept for anything else** (statuses, decimals, dates, foreign keys) and found nothing new. Repeated `end_to_end_id` values are intercompany payments, which legitimately have two legs.
+7. **Opened the answer key.** My counts matched it on all six defect types, with the same payment ids (precision and recall both 1.0).
 
 | Defect | Rows | Fix |
 |---|---|---|
@@ -141,14 +136,12 @@ I explored "Raw" first in `notebooks/01_explore_raw_data.ipynb`, and found 6 def
 | `settled_ts` before `initiated_ts` | 536 | Use the time of the SETTLED event |
 | Missing `purpose_code` | 3,158 | Can't fix, keep the row and flag it |
 
-My counts matched the "answer_key" on all six. The unfinished pipeline code in `src/treasury/pipeline/` is parked and not needed for anything else.
-
-Now that I know what the defects look like, we move on to the SQL analysis, which uses the "Clean" database
+Now that I know what the defects look like, we move on to the SQL analysis, which uses the "Clean" database.
 
 # Step 2: SQL Analysis
-This is where the project starts from now. The queries in `sql/analyses/` run on `data_small/clean/treasury.sqlite`.
+This is where the actual analysis starts. The queries in `sql/analyses/` run on `data_small/clean/treasury.sqlite`.
 
-All the payment data lives in the databases. Therefore, I use SQL to query the database instead of using pandas to manipulate. The data is also relational, spans across multiple tables, needs joins, and is extremely huge. Therefore, SQL is used over pandas to aggregate the data, perform GROUPBY etc. Pandas is more suited when the file is flat and for exploring/modelling, which we already performed in step 1.
+All the data lives in the databases. Therefore, I use SQL to query the database instead of using pandas to manipulate. The data is also relational, spans across multiple tables, needs joins, and is extremely huge. Therefore, SQL is used over pandas to aggregate the data, perform GROUPBY etc. Pandas is more suited when the file is flat and for exploring/modelling, which we already performed in step 1.
 
 ## Analysis 1: Money Movement
 This analysis asks "Where is the money moving?". It asks which entities, countries, and currencies carry the most volume, and at what scale.
