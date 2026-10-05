@@ -556,7 +556,7 @@ WITH xb AS (
            pt.rail AS rail,
            p.amount_sgd,
            (julianday(p.settled_ts) - julianday(p.initiated_ts)) * 24 AS hours_to_settle,
-           CASE WHEN p.status IN ('rejected', 'returned') THEN 1 ELSE 0 END AS is_failed
+           - WHEN p.status IN ('rejected', 'returned') THEN 1 ELSE 0 END AS is_failed
     FROM fact_payment p
     LEFT JOIN dim_payment_type pt ON p.type_id = pt.type_id
     WHERE p.is_intercompany = 0
@@ -1483,6 +1483,371 @@ This Group has 11 entities and 40 bank accounts in 6 currencies. Each account ha
 2. Accounts running short on cash (Overdrawn = high interest rate payable, debit rate)
 
 This analysis asks how much money the group wastes by letting this happen, and how much pooling will save.
+
+### Query 1 - Latest balance per account vs target balance
+With this query, we JOIN to the CTE which serves as an inner join, filtering only the latest dates for each account. From this, we can find the closing balance, the target balance, and the excess (or lack of) balance.
+```SQL
+latest AS (
+    SELECT MAX(date_id) AS date_id FROM fact_balance
+)
+SELECT a.account_id,
+       a.entity_id,
+       a.currency_code,
+       a.is_pooled,
+       ROUND(b.closing_balance, 0)                    AS balance,
+       a.target_balance,
+       ROUND(b.closing_balance - a.target_balance, 0) AS excess_over_target,
+       a.overdraft_limit,
+       ROUND(MAX(0, -b.closing_balance), 0)                         AS overdraft_drawn,   -- what you pay the debit rate on
+       ROUND(a.overdraft_limit + MIN(0, b.closing_balance), 0)      AS headroom,          -- room left before payments bounce
+       ROUND(MAX(0, b.closing_balance - a.target_balance), 0)       AS idle_cash          -- what could be swept out
+FROM fact_balance b
+JOIN latest l      ON l.date_id = b.date_id
+JOIN dim_account a ON a.account_id = b.account_id
+ORDER BY balance DESC;
+```
+account_id|entity_id|currency_code|is_pooled|balance   |target_balance|excess_over_target|overdraft_limit|overdraft_drawn|headroom   |idle_cash |
+----------+---------+-------------+---------+----------+--------------+------------------+---------------+---------------+-----------+----------+
+A015      |E05      |INR          |        0|3996480769|       8187000|        3988293769|              0|            0.0|        0.0|3988293769|
+A045      |E01      |USD          |        0| 278536720|             0|         278536720|      223881000|            0.0|  223881000| 278536720|
+A008      |E03      |CNY          |        0|  58445444|       1372000|          57073444|              0|            0.0|        0.0|  57073444|
+A018      |E05      |USD          |        0|  32008338|        111000|          31897338|              0|            0.0|        0.0|  31897338|
+A003      |E01      |SGD          |        0|  17422914|        321000|          17101914|      300000000|            0.0|  300000000|  17101914|
+A019      |E05      |INR          |        0| 9315833.0|      16202000|        -6886167.0|              0|            0.0|        0.0|       0.0|
+A012      |E04      |CNY          |        0| 8358313.0|        828000|         7530313.0|              0|            0.0|        0.0| 7530313.0|
+A013      |E04      |CNY          |        0| 1498000.0|       1498000|               0.0|              0|            0.0|        0.0|       0.0|
+A017      |E05      |EUR          |        0| 1430587.0|         62000|         1368587.0|              0|            0.0|        0.0| 1368587.0|
+A011      |E04      |CNY          |        0| 1000229.0|        802000|          198229.0|              0|            0.0|        0.0|  198229.0|
+A041      |E11      |USD          |        0|  652661.0|        296000|          356661.0|              0|            0.0|        0.0|  356661.0|
+A034      |E09      |GBP          |        0|  486855.0|        212000|          274855.0|              0|            0.0|        0.0|  274855.0|
+A004      |E02      |SGD          |        0|  421360.0|         85000|          336360.0|              0|            0.0|        0.0|  336360.0|
+A014      |E04      |USD          |        0|  391704.0|        193000|          198704.0|              0|            0.0|        0.0|  198704.0|
+A006      |E02      |USD          |        0|  309031.0|         77000|          232031.0|              0|            0.0|        0.0|  232031.0|
+A044      |E11      |USD          |        0|  286000.0|        286000|               0.0|              0|            0.0|        0.0|       0.0|
+A023      |E06      |USD          |        0|  233044.0|        155000|           78044.0|              0|            0.0|        0.0|   78044.0|
+A007      |E02      |SGD          |        0|  201111.0|        141000|           60111.0|              0|            0.0|        0.0|   60111.0|
+A009      |E03      |USD          |        0|  185991.0|        115000|           70991.0|              0|            0.0|        0.0|   70991.0|
+A030      |E08      |EUR          |        0|  185225.0|         91000|           94225.0|              0|            0.0|        0.0|   94225.0|
+A022      |E06      |EUR          |        0|  173000.0|        173000|               0.0|         300000|            0.0|   300000.0|       0.0|
+A021      |E06      |EUR          |        0|  150558.0|         55000|           95558.0|         300000|            0.0|   300000.0|   95558.0|
+A039      |E10      |EUR          |        0|  150463.0|         94000|           56463.0|              0|            0.0|        0.0|   56463.0|
+A016      |E05      |USD          |        0|  142009.0|        159000|          -16991.0|              0|            0.0|        0.0|       0.0|
+A042      |E11      |USD          |        0|  110357.0|        112000|           -1643.0|              0|            0.0|        0.0|       0.0|
+A024      |E06      |EUR          |        0|   82000.0|         82000|               0.0|         300000|            0.0|   300000.0|       0.0|
+A029      |E07      |USD          |        0|   35451.0|         61000|          -25549.0|              0|            0.0|        0.0|       0.0|
+A005      |E02      |SGD          |        1|       0.0|        174000|         -174000.0|              0|            0.0|        0.0|       0.0|
+A010      |E03      |EUR          |        1|       0.0|        473000|         -473000.0|              0|            0.0|        0.0|       0.0|
+A025      |E07      |EUR          |        1|       0.0|        122000|         -122000.0|              0|            0.0|        0.0|       0.0|
+A026      |E07      |EUR          |        1|       0.0|        123000|         -123000.0|              0|            0.0|        0.0|       0.0|
+A027      |E07      |EUR          |        1|       0.0|        188000|         -188000.0|              0|            0.0|        0.0|       0.0|
+A028      |E07      |USD          |        1|       0.0|        170000|         -170000.0|              0|            0.0|        0.0|       0.0|
+A031      |E08      |USD          |        1|       0.0|        140000|         -140000.0|              0|            0.0|        0.0|       0.0|
+A032      |E08      |EUR          |        1|       0.0|         76000|          -76000.0|              0|            0.0|        0.0|       0.0|
+A033      |E08      |EUR          |        1|       0.0|         90000|          -90000.0|              0|            0.0|        0.0|       0.0|
+A035      |E09      |EUR          |        1|       0.0|        176000|         -176000.0|              0|            0.0|        0.0|       0.0|
+A036      |E09      |USD          |        1|       0.0|         89000|          -89000.0|              0|            0.0|        0.0|       0.0|
+A037      |E10      |USD          |        1|       0.0|        141000|         -141000.0|              0|            0.0|        0.0|       0.0|
+A038      |E10      |USD          |        1|       0.0|        191000|         -191000.0|              0|            0.0|        0.0|       0.0|
+A040      |E11      |USD          |        1|       0.0|        250000|         -250000.0|              0|            0.0|        0.0|       0.0|
+A043      |E11      |USD          |        1|       0.0|        145000|         -145000.0|              0|            0.0|        0.0|       0.0|
+A020      |E06      |EUR          |        0| -168605.0|         63000|         -231605.0|         300000|       168605.0|   131395.0|       0.0|
+A048      |E01      |GBP          |        0| -23093023|             0|         -23093023|      174419000|       23093023|  151325977|       0.0|
+A047      |E01      |INR          |        0| -25155280|             0|         -25155280|    18633540000|       25155280|18608384721|       0.0|
+A001      |E01      |SGD          |        0| -39339410|        260000|         -39599410|      300000000|       39339410|  260660590|       0.0|
+A002      |E01      |EUR          |        0| -70275631|        186000|         -70461631|      206897000|       70275631|  136621369|       0.0|
+A046      |E01      |CNY          |        0|-323387097|             0|        -323387097|     1612903000|      323387097| 1289515903|       0.0|
+
+From the results, we can clearly see which entities and accounts have idle cash that is over what the account needs (and can be moved and utilised elsewhere). If we ORDER BY idle_cash_sgd:
+1. A045 380,259,165 [USD]
+2. A015 64,458,804 [INR]
+3. A018 43,546,342 [USD]
+4. A003 17,101,914[SGD]
+5. A008 10,637,006 [CNY]
+
+If we ORDER BY overdraft_drawn_sgd:
+1. A002 99,798,213 [EUR]
+2. A046 60,270,947 [CNY]
+3. A048 40,460,316 [GBP]
+4. A001 39,339,410 [SGD]
+5. A047 406,560 [INR]
+
+### Query 2 - Investigating idle_sgd and overdrawn_sgd per day, per currency
+
+Pooled accounts are zero-balance (ZBA) accounts. They sweep to 0 every night, so they never hold idle cash or an overdraft at close. Therefore we don't need to filter for this, but we can easily do it using is_pooled = 0 and is_in_house_bank = 0.
+
+```SQL
+WITH acct AS (
+    SELECT b.date_id, a.account_id, c.is_restricted,
+           MAX(0, b.closing_balance - a.target_balance) * fx.rate_to_sgd AS idle_sgd,
+           MAX(0, -b.closing_balance)                   * fx.rate_to_sgd AS overdrawn_sgd
+    FROM fact_balance b
+    JOIN dim_account a   ON a.account_id = b.account_id
+    JOIN dim_entity e    ON e.entity_id = a.entity_id
+    JOIN dim_currency c  ON c.currency_code = b.currency_code
+    JOIN fact_fx_rate fx ON fx.date_id = b.date_id AND fx.currency_code = b.currency_code
+    WHERE a.is_pooled = 0
+      AND e.is_in_house_bank = 0
+),
+daily AS (
+    SELECT date_id,
+           SUM(CASE WHEN is_restricted = 0 THEN idle_sgd ELSE 0 END) AS idle_movable_sgd,
+           SUM(CASE WHEN is_restricted = 1 THEN idle_sgd ELSE 0 END) AS idle_trapped_sgd,
+           SUM(overdrawn_sgd)                                        AS overdrawn_sgd
+    FROM acct
+    GROUP BY date_id
+)
+SELECT date_id,
+       ROUND(idle_movable_sgd, 0)                              AS idle_movable_sgd,
+       ROUND(idle_trapped_sgd, 0)                              AS idle_trapped_sgd,
+       ROUND(overdrawn_sgd, 0)                                 AS overdrawn_sgd,
+       ROUND(MIN(idle_movable_sgd, overdrawn_sgd), 0)          AS offsettable_sgd,
+       ROUND(overdrawn_sgd - MIN(idle_movable_sgd, overdrawn_sgd), 0) AS remaining_overdraft_sgd
+FROM daily
+ORDER BY date_id;
+```
+If we ORDER BY offsettable_sgd, we can see which days could have benefitted the most from being more efficient with where and how our cash is being placed.
+date_id |idle_movable_sgd|idle_trapped_sgd|overdrawn_sgd|offsettable_sgd|remaining_overdraft_sgd|
+--------+----------------+----------------+-------------+---------------+-----------------------+
+20260514|        38050267|        62255308|     298016.0|       298016.0|                    0.0|
+20260513|        39046175|        63624554|     297311.0|       297311.0|                    0.0|
+20260109|        30781433|        46503712|     294143.0|       294143.0|                    0.0|
+20260110|        30781433|        46503712|     294143.0|       294143.0|                    0.0|
+20260111|        30781433|        46503712|     294143.0|       294143.0|                    0.0|
+20241003|       5609482.0|       6019391.0|     275715.0|       275715.0|                    0.0|
+20241002|       6449197.0|       6143726.0|     275102.0|       275102.0|                    0.0|
+20250502|        16426612|        23896210|     252251.0|       252251.0|                    0.0|
+20250503|        16426612|        23896210|     252251.0|       252251.0|                    0.0|
+20250504|        16426612|        23896210|     252251.0|       252251.0|                    0.0|
+20260930|        47996014|        76536209|     239436.0|       239436.0|                    0.0|
+20260327|        33471820|        55737390|     224623.0|       224623.0|                    0.0|
+20260328|        33464156|        55737390|     224623.0|       224623.0|                    0.0|
+
+For 14th May 2026:
+- 38,050,267 idle SGD was movable from unrestricted currencies
+- 622,553,08 idle SGD was trapped and could not be used to offset the overdrawn amounts due to being from restricted currencies (INR & CNY)
+- 298,016 was overdrawn SGD which could be offset from the idle movable SGD
+
+Therefore, on this day, 298,016 SGD could have been offset from pooling
+
+### Query 3 - Estimated benefit of pooling (per year)
+
+```SQL
+WITH acct AS (
+    SELECT b.date_id, c.is_restricted, a.credit_rate, a.debit_rate,
+           MAX(0, b.closing_balance - a.target_balance) * fx.rate_to_sgd AS idle_sgd,
+           MAX(0, -b.closing_balance)                   * fx.rate_to_sgd AS overdrawn_sgd
+    FROM fact_balance b
+    JOIN dim_account a   ON a.account_id = b.account_id
+    JOIN dim_entity e    ON e.entity_id = a.entity_id
+    JOIN dim_currency c  ON c.currency_code = b.currency_code
+    JOIN fact_fx_rate fx ON fx.date_id = b.date_id AND fx.currency_code = b.currency_code
+    WHERE a.is_pooled = 0
+      AND e.is_in_house_bank = 0
+),
+daily AS (
+    SELECT date_id,
+           SUM(CASE WHEN is_restricted = 0 THEN idle_sgd ELSE 0 END)               AS idle_movable_sgd,
+           SUM(CASE WHEN is_restricted = 1 THEN idle_sgd ELSE 0 END)               AS idle_trapped_sgd,
+           SUM(CASE WHEN is_restricted = 0 THEN idle_sgd * credit_rate ELSE 0 END) AS idle_x_credit,
+           SUM(overdrawn_sgd)                                                      AS overdrawn_sgd,
+           SUM(overdrawn_sgd * debit_rate)                                         AS overdrawn_x_debit
+    FROM acct
+    GROUP BY date_id
+),
+sgd_conversion AS (
+    SELECT date_id, idle_movable_sgd, idle_trapped_sgd, overdrawn_sgd,
+           MIN(idle_movable_sgd, overdrawn_sgd)                                    AS offsettable_sgd,
+           overdrawn_sgd - MIN(idle_movable_sgd, overdrawn_sgd)                    AS remaining_overdraft_sgd,
+           COALESCE(overdrawn_x_debit / NULLIF(overdrawn_sgd, 0), 0)               AS weighted_debit_rate,
+           COALESCE(idle_x_credit     / NULLIF(idle_movable_sgd, 0), 0)            AS weighted_credit_rate
+    FROM daily
+),
+offset_dr_cr AS (
+    SELECT date_id,
+           offsettable_sgd,
+           offsettable_sgd * weighted_credit_rate / 365 AS idle_credit_interest_foregone,
+           offsettable_sgd * weighted_debit_rate  / 365 AS overdraft_debit_interest_avoided
+    FROM sgd_conversion
+)
+SELECT dd.year,
+       ROUND(SUM(idle_credit_interest_foregone), 0)    AS sum_idle_credit_interest_foregone_sgd,
+       ROUND(SUM(overdraft_debit_interest_avoided), 0) AS sum_overdraft_debit_interest_avoided,
+       ROUND(SUM(overdraft_debit_interest_avoided - idle_credit_interest_foregone), 0) AS net_benefit_from_pooling
+FROM offset_dr_cr odc
+JOIN dim_date dd ON dd.date_id = odc.date_id
+GROUP BY dd.year
+ORDER BY dd.year;
+```
+year|sum_idle_credit_interest_foregone_sgd|sum_overdraft_debit_interest_avoided|net_benefit_from_pooling|
+----+-------------------------------------+------------------------------------+------------------------+
+2024|                                 48.0|                               179.0|                   131.0|
+2025|                                 84.0|                               275.0|                   192.0|
+2026|                                184.0|                               579.0|                   396.0|
+
+Germany's overdraft is too small for pooling to matter once the HQ in-house bank (E01) is excluded. Query 4 shows how much the answer depends on that choice.
+
+### Query 4 - Pooling benefit under three treatments of the HQ in-house bank
+
+E01 is the in-house bank and pool header, and it holds almost all of the group's overdraft (3,650 overdrawn account-days, averaging about S$27.8m, against 44 days and about S$143k for Germany). Whether E01's overdraft counts as avoidable decides the headline number, so this query runs three scenarios side by side:
+
+- **A:** subsidiaries only (E01 excluded).
+- **B:** E01 included, and all overdraft can be offset by movable idle cash.
+- **C:** E01 included, but restricted-currency (CNY, INR) overdraft cannot be offset. This is the lower bound.
+
+`annual_saving_sgd` is the total over all days divided by (days / 365), so the partial first year does not skew it.
+
+```SQL
+WITH acct AS (
+    SELECT b.date_id, c.is_restricted, e.is_in_house_bank AS hq, a.credit_rate, a.debit_rate,
+           MAX(0, b.closing_balance - a.target_balance) * fx.rate_to_sgd AS idle_sgd,
+           MAX(0, -b.closing_balance)                   * fx.rate_to_sgd AS od_sgd
+    FROM fact_balance b
+    JOIN dim_account a   ON a.account_id = b.account_id
+    JOIN dim_entity e    ON e.entity_id = a.entity_id
+    JOIN dim_currency c  ON c.currency_code = b.currency_code
+    JOIN fact_fx_rate fx ON fx.date_id = b.date_id AND fx.currency_code = b.currency_code
+    WHERE a.is_pooled = 0
+),
+scen(name, incl_hq, od_unrestricted_only) AS (
+    VALUES ('A: subsidiaries only (excl. HQ)', 0, 0),
+           ('B: incl. HQ, all overdraft', 1, 0),
+           ('C: incl. HQ, unrestricted overdraft only', 1, 1)
+),
+daily AS (
+    SELECT s.name, x.date_id,
+           SUM(CASE WHEN x.is_restricted = 0 THEN x.idle_sgd ELSE 0 END)                AS idle_mov,
+           SUM(CASE WHEN x.is_restricted = 0 THEN x.idle_sgd * x.credit_rate ELSE 0 END) AS idle_x_cr,
+           SUM(CASE WHEN s.od_unrestricted_only = 1 AND x.is_restricted = 1 THEN 0 ELSE x.od_sgd END)            AS od,
+           SUM(CASE WHEN s.od_unrestricted_only = 1 AND x.is_restricted = 1 THEN 0 ELSE x.od_sgd * x.debit_rate END) AS od_x_db
+    FROM acct x JOIN scen s ON (s.incl_hq = 1 OR x.hq = 0)
+    GROUP BY s.name, x.date_id
+),
+cost AS (
+    SELECT name, date_id, od, MIN(idle_mov, od) AS offs,
+           MIN(idle_mov, od) * (COALESCE(od_x_db / NULLIF(od, 0), 0)
+                              - COALESCE(idle_x_cr / NULLIF(idle_mov, 0), 0)) / 365 AS saving
+    FROM daily
+)
+SELECT name,
+       SUM(od > 0)                                   AS days_overdrawn,
+       ROUND(AVG(od))                                AS avg_overdrawn_sgd,
+       ROUND(AVG(offs))                              AS avg_offsettable_sgd,
+       ROUND(SUM(saving) / (COUNT(*) / 365.0))       AS annual_saving_sgd
+FROM cost
+GROUP BY name
+ORDER BY name;
+```
+
+| Scenario | Days overdrawn | Avg overdrawn (SGD) | Avg offsettable (SGD) | Annual saving (SGD) |
+|---|---|---|---|---|
+| A: subsidiaries only (excl. HQ) | 44 | 8,612 | 8,612 | 359 |
+| B: incl. HQ, all overdraft | 730 | 139,186,557 | 139,031,374 | 5,376,205 |
+| C: incl. HQ, unrestricted overdraft only | 730 | 100,398,562 | 100,398,562 | 4,171,317 |
+
+**Result.** Pooling could save the group roughly **S$4-5m a year**, almost all of it from netting the in-house bank's overdraft against cash held by unpooled subsidiaries. Counting subsidiaries only, the saving is negligible (about S$359 a year), because Germany is overdrawn on only 44 of the 730 days.
+
+**Assumptions and limits.**
+- Unpooled accounts only. Pooled accounts sweep to zero every night, so they hold no idle cash or overdraft.
+- CNY and INR idle cash is trapped and is never used to offset anything. About S$38.6m of idle cash a day is trapped, more than the S$27.9m that is movable.
+- Idle cash and overdraft are offset across currencies, using the rates in `fact_fx_rate`. Scenario C is the stricter version for restricted currencies.
+- The figures are gross of the cost of running a pool (fees, and tax and legal issues on intercompany loans). The data does not model these.
+- B and C treat E01's overdraft as avoidable. If E01 is overdrawn because it lent to the subsidiaries that now hold the cash, offsetting would double count. This has not been checked against the funding flows (`fact_sweep`, intercompany payments), so read the S$4-5m as an upper estimate.
+- These are `data_small` numbers. The full profile may differ.
+
+### Query 5 - Views
+
+Three views save the results above for the dashboards. `vw_06_account_position` is the latest balance per account, `vw_06_daily_idle_vs_overdrawn` is the daily series for the idle against overdrawn chart (with `overdrawn_hq_sgd` showing how much of the overdraft is the in-house bank), and `vw_06_pooling_benefit` is the annual saving under the three scenarios.
+
+```SQL
+DROP VIEW IF EXISTS vw_06_account_position;
+CREATE VIEW vw_06_account_position AS
+SELECT a.account_id, a.entity_id, a.currency_code, a.is_pooled, c.is_restricted,
+       b.date_id,
+       ROUND(b.closing_balance, 0)                                                AS balance,
+       ROUND(b.closing_balance * fx.rate_to_sgd, 0)                               AS balance_sgd,
+       ROUND(a.target_balance * fx.rate_to_sgd, 0)                                AS target_sgd,
+       ROUND(MAX(0, b.closing_balance - a.target_balance) * fx.rate_to_sgd, 0)    AS idle_sgd,
+       ROUND(MAX(0, -b.closing_balance) * fx.rate_to_sgd, 0)                      AS overdrawn_sgd,
+       ROUND((a.overdraft_limit + MIN(0, b.closing_balance)) * fx.rate_to_sgd, 0) AS headroom_sgd
+FROM fact_balance b
+JOIN dim_account a   ON a.account_id = b.account_id
+JOIN dim_currency c  ON c.currency_code = b.currency_code
+JOIN fact_fx_rate fx ON fx.date_id = b.date_id AND fx.currency_code = b.currency_code
+WHERE b.date_id = (SELECT MAX(date_id) FROM fact_balance);
+
+DROP VIEW IF EXISTS vw_06_daily_idle_vs_overdrawn;
+CREATE VIEW vw_06_daily_idle_vs_overdrawn AS
+WITH acct AS (
+    SELECT b.date_id, c.is_restricted, e.is_in_house_bank AS hq,
+           MAX(0, b.closing_balance - a.target_balance) * fx.rate_to_sgd AS idle_sgd,
+           MAX(0, -b.closing_balance)                   * fx.rate_to_sgd AS overdrawn_sgd
+    FROM fact_balance b
+    JOIN dim_account a   ON a.account_id = b.account_id
+    JOIN dim_entity e    ON e.entity_id = a.entity_id
+    JOIN dim_currency c  ON c.currency_code = b.currency_code
+    JOIN fact_fx_rate fx ON fx.date_id = b.date_id AND fx.currency_code = b.currency_code
+    WHERE a.is_pooled = 0
+),
+daily AS (
+    SELECT date_id,
+           SUM(CASE WHEN is_restricted = 0 THEN idle_sgd ELSE 0 END)  AS idle_movable_sgd,
+           SUM(CASE WHEN is_restricted = 1 THEN idle_sgd ELSE 0 END)  AS idle_trapped_sgd,
+           SUM(overdrawn_sgd)                                         AS overdrawn_sgd,
+           SUM(CASE WHEN hq = 1 THEN overdrawn_sgd ELSE 0 END)        AS overdrawn_hq_sgd
+    FROM acct
+    GROUP BY date_id
+)
+SELECT date_id,
+       ROUND(idle_movable_sgd, 0)                                  AS idle_movable_sgd,
+       ROUND(idle_trapped_sgd, 0)                                  AS idle_trapped_sgd,
+       ROUND(overdrawn_sgd, 0)                                     AS overdrawn_sgd,
+       ROUND(overdrawn_hq_sgd, 0)                                  AS overdrawn_hq_sgd,
+       ROUND(MIN(idle_movable_sgd, overdrawn_sgd), 0)              AS offsettable_sgd,
+       ROUND(overdrawn_sgd - MIN(idle_movable_sgd, overdrawn_sgd), 0) AS remaining_overdraft_sgd
+FROM daily;
+
+DROP VIEW IF EXISTS vw_06_pooling_benefit;
+CREATE VIEW vw_06_pooling_benefit AS
+WITH acct AS (
+    SELECT b.date_id, c.is_restricted, e.is_in_house_bank AS hq, a.credit_rate, a.debit_rate,
+           MAX(0, b.closing_balance - a.target_balance) * fx.rate_to_sgd AS idle_sgd,
+           MAX(0, -b.closing_balance)                   * fx.rate_to_sgd AS od_sgd
+    FROM fact_balance b
+    JOIN dim_account a   ON a.account_id = b.account_id
+    JOIN dim_entity e    ON e.entity_id = a.entity_id
+    JOIN dim_currency c  ON c.currency_code = b.currency_code
+    JOIN fact_fx_rate fx ON fx.date_id = b.date_id AND fx.currency_code = b.currency_code
+    WHERE a.is_pooled = 0
+),
+scen(name, incl_hq, od_unrestricted_only) AS (
+    VALUES ('A: subsidiaries only (excl. HQ)', 0, 0),
+           ('B: incl. HQ, all overdraft', 1, 0),
+           ('C: incl. HQ, unrestricted overdraft only', 1, 1)
+),
+daily AS (
+    SELECT s.name, x.date_id,
+           SUM(CASE WHEN x.is_restricted = 0 THEN x.idle_sgd ELSE 0 END)                AS idle_mov,
+           SUM(CASE WHEN x.is_restricted = 0 THEN x.idle_sgd * x.credit_rate ELSE 0 END) AS idle_x_cr,
+           SUM(CASE WHEN s.od_unrestricted_only = 1 AND x.is_restricted = 1 THEN 0 ELSE x.od_sgd END)            AS od,
+           SUM(CASE WHEN s.od_unrestricted_only = 1 AND x.is_restricted = 1 THEN 0 ELSE x.od_sgd * x.debit_rate END) AS od_x_db
+    FROM acct x JOIN scen s ON (s.incl_hq = 1 OR x.hq = 0)
+    GROUP BY s.name, x.date_id
+),
+cost AS (
+    SELECT name, date_id, od, MIN(idle_mov, od) AS offs,
+           MIN(idle_mov, od) * (COALESCE(od_x_db / NULLIF(od, 0), 0)
+                              - COALESCE(idle_x_cr / NULLIF(idle_mov, 0), 0)) / 365 AS saving
+    FROM daily
+)
+SELECT name                                          AS scenario,
+       SUM(od > 0)                                   AS days_overdrawn,
+       ROUND(AVG(od))                                AS avg_overdrawn_sgd,
+       ROUND(AVG(offs))                              AS avg_offsettable_sgd,
+       ROUND(SUM(saving) / (COUNT(*) / 365.0))       AS annual_saving_sgd
+FROM cost
+GROUP BY name;
+```
+
 ## Layout
 
 | Path | Part | What |
