@@ -12,7 +12,7 @@ Picture one fictional company, **Group Treasury HQ in Singapore**, that owns ten
 | Term | Plain meaning | Example from the data |
 |---|---|---|
 | **11 entities** | The separate legal companies inside the group. Each has its own bank accounts, home currency and local rules. One (the HQ) also acts as the group's *in-house bank*, lending cash to the others. | `E03` **Shanghai Mfg**, a factory in China that earns and pays in yuan (CNY), and `E06` **Germany GmbH**, which pays in euros. |
-| ** 48 accounts** | Bank accounts held by those entities at fictional banks. Each has a currency, a target balance the treasury wants to keep, and sometimes an overdraft limit. Some are *pooled*: any surplus is swept to a header account every night. | `A004` is SG Operations' main SGD account at *Merlion Global Bank* (a made-up bank). |
+| **48 accounts** | Bank accounts held by those entities at fictional banks. Each has a currency, a target balance the treasury wants to keep, and sometimes an overdraft limit. Some are *pooled*: any surplus is swept to a header account every night. | `A004` is SG Operations' main SGD account at *Merlion Global Bank* (a made-up bank). |
 | **6 currencies** | SGD, USD, EUR, GBP, CNY, INR. The group reports in SGD, so every payment also carries its SGD value. CNY and INR are *restricted*: cash can't move freely in or out of China and India. | A payment of 10,739.70 GBP is stored as S$18,108.73 at that day's exchange rate. |
 | **Payment rails** | The "roads" money travels on. Which road you use decides how fast it arrives, what it costs and how often it fails. | See the three types below. |
 
@@ -309,10 +309,10 @@ ORDER BY net_inflow DESC;
 | E03 | 211730508.9 | 215603869.12 | -3873360.22 |
 | E06 | 166528987.38 | 241711795.39 | -75182808.01 |
 
-E05 (India Services) is the biggest net receiver, and E06 (Germany GmbH) is the biggest net payer.
+E05 (India Services) is the biggest net receiver, and E06 (Germany GmbH) is the biggest net payer. A net payer burns through cash and needs more funding from the Group (E01). A net receiver builds up cash that could be moved elsewhere (Liquidity & Cash Concentration).
 
 ### Query 5 - Monthly trend
-We can see the total value of payments moving by month
+We can see the total value of payments moving by month.
 
 ```sql
 WITH base AS (
@@ -344,6 +344,9 @@ SELECT STRFTIME('%Y-%m',pay_date) AS month,
  ORDER BY month ASC;
 ```
 
+<details>
+<summary>Query 5: show the output (24 rows)</summary>
+
 | month | n_payments | value_sgd_m | inflow_sgd | outflow_sgd | net_inflow |
 |---|---|---|---|---|---|
 | 2024-10 | 3967 | 102.4 | 53.9 | 48.5 | 5.3 |
@@ -371,64 +374,14 @@ SELECT STRFTIME('%Y-%m',pay_date) AS month,
 | 2026-08 | 4575 | 151.4 | 83.7 | 67.7 | 16.0 |
 | 2026-09 | 4532 | 155.6 | 84.8 | 70.9 | 13.9 |
 
+</details>
+
 Both inflows and outflows trend upwards over the 24 months, and net inflow is positive in every month except 2025-07.
 
 ### Query 6 - Saving as a view for the dashboard
 All of our queries above are important, and we want a way to save each finished query as a view. The dashboard will read the view instead of repeating the SQL
 
-Add these lines:
-```sql
-DROP VIEW IF EXISTS vw_01_currency;
-CREATE VIEW vw_01_currency AS
-SELECT p.currency_code,
-       COUNT(*)                          AS n_payments,
-       ROUND(SUM(p.amount_sgd) / 1e6, 1) AS value_sgd_m
-FROM fact_payment p
-WHERE p.is_intercompany = 0
-  AND p.status IN ('completed', 'delayed')
-GROUP BY p.currency_code;
-
-DROP VIEW IF EXISTS vw_01_corridor;
-CREATE VIEW vw_01_corridor AS
-SELECT p.sender_country || ' → ' || p.receiver_country AS corridor,
-       p.sender_country,
-       p.receiver_country,
-       COUNT(*)                          AS n_payments,
-       ROUND(SUM(p.amount_sgd) / 1e6, 1) AS value_sgd_m
-FROM fact_payment p
-WHERE p.is_intercompany = 0
-  AND p.status IN ('completed', 'delayed')
-  AND p.sender_country <> p.receiver_country
-GROUP BY p.sender_country, p.receiver_country;
-
-DROP VIEW IF EXISTS vw_01_entity;
-CREATE VIEW vw_01_entity AS
-SELECT e.entity_id,
-       e.name AS entity_name,
-       ROUND(SUM(CASE WHEN p.direction = 'IN'  THEN p.amount_sgd ELSE 0 END), 2) AS inflow_sgd,
-       ROUND(SUM(CASE WHEN p.direction = 'OUT' THEN p.amount_sgd ELSE 0 END), 2) AS outflow_sgd,
-       ROUND(SUM(CASE WHEN p.direction = 'IN' THEN p.amount_sgd ELSE -p.amount_sgd END), 2) AS net_inflow_sgd
-FROM fact_payment p
-JOIN dim_account a ON a.account_id = p.account_id
-JOIN dim_entity  e ON e.entity_id  = a.entity_id
-WHERE p.is_intercompany = 0
-  AND p.status IN ('completed', 'delayed')
-GROUP BY e.entity_id, e.name;
-
-DROP VIEW IF EXISTS vw_01_monthly;
-CREATE VIEW vw_01_monthly AS
-SELECT strftime('%Y-%m', p.initiated_ts)    AS month,
-       date(p.initiated_ts, 'start of month') AS month_start,      -- a real date: Tableau needs one for a time axis
-       COUNT(*)                          AS n_payments,
-       ROUND(SUM(p.amount_sgd) / 1e6, 1) AS value_sgd_m,
-       ROUND(SUM(CASE WHEN p.direction = 'IN'  THEN p.amount_sgd ELSE 0 END) / 1e6, 1) AS inflow_sgd_m,
-       ROUND(SUM(CASE WHEN p.direction = 'OUT' THEN p.amount_sgd ELSE 0 END) / 1e6, 1) AS outflow_sgd_m,
-       ROUND(SUM(CASE WHEN p.direction = 'IN' THEN p.amount_sgd ELSE -p.amount_sgd END) / 1e6, 1) AS net_inflow_sgd_m
-FROM fact_payment p
-WHERE p.is_intercompany = 0
-  AND p.status IN ('completed', 'delayed')
-GROUP BY month;
-```
+➡️ **[See the SQL for these views in Step 3](#views-analysis-1)**
 
 ## Analysis 2: Cross Border Payments
 The first analysis focused on which entities, countries, and currencies carry the most volume. This analysis zooms into the specific payments that cross a border. It measures how well money moves across borders: how long it takes to settle and how often it fails.
@@ -460,6 +413,9 @@ ORDER BY hours_to_settle DESC
 LIMIT 20;
 ```
 
+<details>
+<summary>Query 1: show the output (20 rows)</summary>
+
 | payment_id | corridor | rail | amount_sgd | status | is_failed | hours_to_settle |
 |---|---|---|---|---|---|---|
 | P00076889 | CN → US | CARD | 462.72 | completed | 0 | 305.3 |
@@ -482,6 +438,8 @@ LIMIT 20;
 | P00023828 | CN → IN | CARD | 69.27 | completed | 0 | 240.7 |
 | P00057496 | CN → JP | CARD | 1613.56 | completed | 0 | 239.2 |
 | P00057507 | CN → US | CARD | 73.02 | completed | 0 | 238.8 |
+
+</details>
 
 From eyeballing the top 20 results, corridors where CN is the sender have the largest hours to settle, and most of these rows are CARD payments. We can investigate further with queries below.
 
@@ -510,6 +468,9 @@ GROUP BY corridor
 HAVING n_payments >= 200
 ORDER BY avg_hours DESC;
 ```
+
+<details>
+<summary>Query 2: show the output (68 rows)</summary>
 
 | corridor | n_payments | value_sgd_m | avg_hours | pct_over_48h | failure_pct |
 |---|---|---|---|---|---|
@@ -582,6 +543,8 @@ ORDER BY avg_hours DESC;
 | MY → DE | 292 | 14.5 | 8.1 | 2.1 | 1.0 |
 | VN → GB | 206 | 9.0 | 8.0 | 3.4 | 0.5 |
 
+</details>
+
 For settled payments (rejected and returned payments have NULL), SG → VN, IN → VN, and GB → CN are the 3 corridors with the longest average hours for time taken to settle. We can also see that for these 3 corridors, the percent of payments that take longer than 48 hours is also significantly high. 
 
 By changing the SQL query to order by failure_pct, we can see that the corridors US → IN, CN → XB, and IN → VN have the highest failure percentages.
@@ -622,33 +585,8 @@ ORDER BY avg_hours DESC;
 We can see that there is a trade off for using each payment rail. For CARD payments, the average total value per transaction is small as compared to SWIFT_XBORDER, but faces a much longer average time to settle. There are no other rails as we have filtered out payments which are NOT cross border.
 
 ### Query 4 - Views
-```sql
-DROP VIEW IF EXISTS vw_02_corridor_scorecard;
-CREATE VIEW vw_02_corridor_scorecard AS
-WITH xb AS (
-    SELECT p.sender_country || ' → ' || p.receiver_country AS corridor,
-           p.sender_country,
-           p.receiver_country,
-           p.amount_sgd,
-           (julianday(p.settled_ts) - julianday(p.initiated_ts)) * 24 AS hours_to_settle,
-           CASE WHEN p.status IN ('rejected', 'returned') THEN 1 ELSE 0 END AS is_failed
-    FROM fact_payment p
-    WHERE p.is_intercompany = 0
-      AND p.sender_country <> p.receiver_country
-      AND p.status <> 'pending'
-)
-SELECT corridor,
-       sender_country,
-       receiver_country,
-       COUNT(*)                                        AS n_payments,
-       ROUND(SUM(amount_sgd) / 1e6, 1)                 AS value_sgd_m,
-       ROUND(AVG(hours_to_settle), 1)                  AS avg_hours,
-       ROUND(100.0 * AVG(hours_to_settle > 48), 1)     AS pct_over_48h,
-       ROUND(100.0 * SUM(is_failed) / COUNT(*), 1)     AS failure_pct
-FROM xb
-GROUP BY corridor, sender_country, receiver_country
-HAVING n_payments >= 200;
-```
+
+➡️ **[See the SQL for these views in Step 3](#views-analysis-2)**
 
 ## Analysis 3: Payment Efficiency
 This analysis investigates how fast and "hands-free" the payments are. For example, we monitor processing time, the straight through processing (STP) rate (% of transactions successfully processed without intervention), the % of transactions that need a repair and missed the cut-off, by rail and by channel (the way we hand a payment to the bank).
@@ -677,6 +615,9 @@ WITH eff AS (
 SELECT * FROM eff LIMIT 20;
 ```
 
+<details>
+<summary>Query 1: show the output (20 rows)</summary>
+
 | payment_id | channel | rail | is_cross_border | is_stp | repair_count | missed_cutoff | hours_total |
 |---|---|---|---|---|---|---|---|
 | P00008586 | API | SWIFT_XBORDER | 1 | 1 | 0 | 0 | 0.6 |
@@ -699,6 +640,8 @@ SELECT * FROM eff LIMIT 20;
 | P00008607 | H2H_FILE | SWIFT_XBORDER | 1 | 1 | 0 | 0 | 0.8 |
 | P00008608 | API | SWIFT_XBORDER | 1 | 1 | 0 | 0 | 2.0 |
 | P00008609 | PORTAL | CARD | 0 | 1 | 0 | 0 | 45.2 |
+
+</details>
 
 ### Query 2 - STP, repair, and cut-off rates by channel
 This query asks "How hands-free are the payments?" and investigates this through is_stp, repair_count, and missed cutoff fields given in the payments table.
@@ -731,7 +674,7 @@ ORDER BY stp_pct;
 | H2H_FILE | 19810 | 95.6 | 3.8 | 2.6 |
 | API | 23836 | 97.5 | 1.4 | 1.4 |
 
-LEGACY_FILE is clearly the worst on STP, repairs, and missed cut-offs.
+LEGACY_FILE is clearly the worst on STP, repairs, and missed cut-offs. Legacy files are usually older proprietary payment files generated by old ERP or manual spreadsheet exports before being uploaded to a bank portal. This makes sense as API or H2H connections in comparison send structured, modern messages straight to the system.
 
 ### Query 3 - Average hours and share over 48 hours by rail
 This query asks how fast the payments are for each payment rail. We join the payment type dimension table to get the rail. We choose a rail mainly because of the destination and the type of payment.
@@ -797,6 +740,9 @@ HAVING n >= 30          -- small groups give noisy averages
 ORDER BY rail, missed_cutoff;
 ```
 
+<details>
+<summary>Query 4: show the output (16 rows)</summary>
+
 | rail | missed_cutoff | n | avg_hours |
 |---|---|---|---|
 | ACH | 0 | 1215 | 28.7 |
@@ -815,6 +761,8 @@ ORDER BY rail, missed_cutoff;
 | SEPA_CT | 1 | 209 | 79.1 |
 | SEPA_INST | 0 | 441 | 1.5 |
 | SWIFT_XBORDER | 0 | 15420 | 12.7 |
+
+</details>
 
 By comparing within each rail, we can see that the cost of missing a cutoff is high, with ~3x the average hours for ACH, ~7x for CNAPS and ~3x for SEPA_CT.
 
@@ -879,6 +827,10 @@ GROUP BY was_held;
 Within SWIFT_XBORDER, a hold more than doubles the time to settle: 14.1 hours without a hold against 30.4 hours with one.
 
 ### Query 7 - making it into a view
+
+The dashboard reads views, so each finished query is saved as one. Three views come out of this analysis: `vw_03_channel_efficiency` (STP, repair and missed cut-off rate by channel), `vw_03_rail_timing` (average hours and share over 48 hours by rail) and `vw_03_stage_durations` (average hours in each processing stage).
+
+➡️ **[See the SQL for these views in Step 3](#views-analysis-3)**
 
 ## Analysis 4: Payment Failures
 This analysis investigates why payments fail, and whether we can stop the failures.
@@ -1077,6 +1029,9 @@ GROUP BY month
 ORDER BY month;
 ```
 
+<details>
+<summary>Query 6: show the output (24 rows)</summary>
+
 | month | n_payments | n_failed | fail_rate_pct | failed_value_sgd_m |
 |---|---|---|---|---|
 | 2024-10 | 2726 | 38 | 1.39 | 0.64 |
@@ -1104,92 +1059,13 @@ ORDER BY month;
 | 2026-08 | 3035 | 42 | 1.38 | 1.1 |
 | 2026-09 | 3022 | 38 | 1.26 | 2.05 |
 
+</details>
+
 Across the 24 months the failure rate stays between 1.05% and 1.88%, with an average of about 1.4%. There is no spike and no upward or downward trend, so failures are a steady problem and not a growing one.
 
 ### Query 7 - Views
-```sql
-DROP VIEW IF EXISTS vw_04_failure_pareto;
-CREATE VIEW vw_04_failure_pareto AS
-SELECT p.failure_reason,
-       dfr.description AS failure_description,
-       dfr.category,
-       COUNT(*)        AS n_payment_failures,
-       ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 1) AS pct_of_failures,
-       ROUND(100.0 * SUM(COUNT(*)) OVER (ORDER BY COUNT(*) DESC) / SUM(COUNT(*)) OVER (), 1) AS cum_pct,
-       ROUND(SUM(p.amount_sgd) / 1e6, 2) AS failed_value_sgd_m
-FROM fact_payment p
-JOIN dim_failure_reason dfr ON p.failure_reason = dfr.reason_code
-WHERE p.is_intercompany = 0
-  AND p.direction = 'OUT'
-  AND p.status IN ('rejected', 'returned')
-GROUP BY p.failure_reason, dfr.description, dfr.category;
 
-DROP VIEW IF EXISTS vw_04_repeat_offenders;
-CREATE VIEW vw_04_repeat_offenders AS
-SELECT p.counterparty_id,
-       cp.name,
-       cp.counterparty_type,
-       cp.country,
-       cp.risk_rating,
-       ROUND(cp.data_quality_score, 2) AS data_quality_score,
-       COUNT(*) AS n_payments,
-       SUM(p.status IN ('rejected', 'returned')) AS n_failed,
-       ROUND(100.0 * AVG(p.status IN ('rejected', 'returned')), 1) AS fail_rate_pct,
-       ROUND(SUM(CASE WHEN p.status IN ('rejected', 'returned') THEN p.amount_sgd ELSE 0 END) / 1e6, 2)
-                                                                   AS failed_value_sgd_m
-FROM fact_payment p
-JOIN dim_counterparty cp ON p.counterparty_id = cp.counterparty_id
-WHERE p.is_intercompany = 0
-  AND p.direction = 'OUT'
-  AND p.status <> 'pending'
-GROUP BY p.counterparty_id, cp.name, cp.counterparty_type, cp.country, cp.risk_rating, cp.data_quality_score
-HAVING n_failed >= 5;
-
-DROP VIEW IF EXISTS vw_04_risk_rating;
-CREATE VIEW vw_04_risk_rating AS
-SELECT cp.risk_rating,
-       COUNT(*) AS n_payments,
-       SUM(p.status IN ('rejected', 'returned')) AS n_failed,
-       ROUND(100.0 * AVG(p.status IN ('rejected', 'returned')), 1) AS fail_rate_pct,
-       ROUND(SUM(CASE WHEN p.status IN ('rejected', 'returned') THEN p.amount_sgd ELSE 0 END) / 1e6, 2)
-                                                                   AS failed_value_sgd_m
-FROM fact_payment p
-JOIN dim_counterparty cp ON p.counterparty_id = cp.counterparty_id
-WHERE p.is_intercompany = 0
-  AND p.direction = 'OUT'
-  AND p.status <> 'pending'
-GROUP BY cp.risk_rating;
-
-DROP VIEW IF EXISTS vw_04_failure_rail;
-CREATE VIEW vw_04_failure_rail AS
-SELECT t.rail,
-       COUNT(*)                                                    AS n_payments,
-       SUM(p.status IN ('rejected', 'returned'))                   AS n_failed,
-       ROUND(100.0 * AVG(p.status IN ('rejected', 'returned')), 2) AS fail_rate_pct,
-       ROUND(SUM(CASE WHEN p.status IN ('rejected', 'returned') THEN p.amount_sgd ELSE 0 END) / 1e6, 2)
-                                                                   AS failed_value_sgd_m
-FROM fact_payment p
-JOIN dim_payment_type t ON t.type_id = p.type_id
-WHERE p.is_intercompany = 0
-  AND p.direction = 'OUT'
-  AND p.status <> 'pending'
-GROUP BY t.rail;
-
-DROP VIEW IF EXISTS vw_04_failure_trend;
-CREATE VIEW vw_04_failure_trend AS
-SELECT strftime('%Y-%m', p.initiated_ts)                           AS month,
-       date(p.initiated_ts, 'start of month')                      AS month_start,   -- a real date for the time axis
-       COUNT(*)                                                    AS n_payments,
-       SUM(p.status IN ('rejected', 'returned'))                   AS n_failed,
-       ROUND(100.0 * AVG(p.status IN ('rejected', 'returned')), 2) AS fail_rate_pct,
-       ROUND(SUM(CASE WHEN p.status IN ('rejected', 'returned') THEN p.amount_sgd ELSE 0 END) / 1e6, 2)
-                                                                   AS failed_value_sgd_m
-FROM fact_payment p
-WHERE p.is_intercompany = 0
-  AND p.direction = 'OUT'
-  AND p.status <> 'pending'
-GROUP BY month;
-```
+➡️ **[See the SQL for these views in Step 3](#views-analysis-4)**
 
 ## Analysis 5: Liquidity Forecast
 This analysis asks how much cash each entity and currency will have over the next 13 weeks, so treasury can fund a shortfall early instead of going into overdraft.
@@ -1239,6 +1115,9 @@ WHERE p.settled_ts IS NOT NULL
 GROUP BY 1, 2, 3
 ORDER BY 2, 3, 1;
 ```
+
+<details>
+<summary>Query 2: show the output (201 rows)</summary>
 
 | settle_date | entity_id | currency_code | net_flow |
 |---|---|---|---:|
@@ -1444,6 +1323,8 @@ ORDER BY 2, 3, 1;
 | 2025-03-06 | E01 | EUR | -5320.45 |
 | 2025-03-07 | E01 | EUR | -248193.1 |
 
+</details>
+
 ### Query 3 - Reconciling the daily balances and the daily net cash flow
 This query checks whether the two sources we built in Queries 1 and 2 tell the same story. The balance table says where cash ended each day, and the payments table says what moved. If payments were the only thing moving a balance, then `balance_change` (today's closing balance minus yesterday's, from `LAG`) should equal `net_flow` (the day's settled payments). The query puts both side by side for every entity, currency and day. The `LEFT JOIN` keeps days with no payments (net flow shown as 0), and the first day of each series has no `balance_change` because there is no day before it.
 
@@ -1469,6 +1350,9 @@ SELECT bal.date_id, bal.entity_id, bal.currency_code, bal.closing_balance,
 FROM bal LEFT JOIN flow USING (date_id, entity_id, currency_code)
 ORDER BY entity_id, currency_code, date_id;
 ```
+
+<details>
+<summary>Query 3: show the output (52 rows)</summary>
 
 | date_id | entity_id | currency_code | closing_balance | net_flow | balance_change |
 |---:|---|---|---:|---:|---:|
@@ -1525,6 +1409,8 @@ ORDER BY entity_id, currency_code, date_id;
 | 20241120 | E01 | CNY | -58467741.9 | 0 | 0.0 |
 | 20241121 | E01 | CNY | -58548387.06 | -80645.16 | -80645.16 |
 
+</details>
+
 **How to read the result.** The two columns match closely only for accounts whose balance moves with payments alone (for example E05 in INR and USD). Over the whole period E05 USD's balance rose 30.41M and its settled payments sum to 30.44M. They do not match on most other accounts, because balances also move from non-payment postings such as sweeps and funding transfers. E02 SGD is the extreme case: payments net to -393M but its balance only fell 1.3M. Sweeps out of that account account for 23.6M of the gap. I did not itemise the rest. So this query is a **diagnostic, not a pass/fail test**: it shows which accounts are driven by customer and supplier payments (forecast them from payments) and which are driven by treasury moves (forecast them from the sweep and funding rules instead). Matching day by day is rare (about 6% of days that have a payment, with either filter), so judge it over the period, not per day.
 
 #### Which payment statuses count as cash movement, and what is left out
@@ -1567,6 +1453,9 @@ GROUP BY d.year, d.week, dd.entity_id, dd.currency_code
 ORDER BY dd.entity_id, dd.currency_code, d.year, d.week;
 ```
 
+<details>
+<summary>Query 4: show the output (30 rows)</summary>
+
 | year | week | entity_id | currency_code | weekly_net_flow | active_days |
 |---:|---:|---|---|---:|---:|
 | 2024 | 45 | E01 | CNY | -7419354.83 | 2 |
@@ -1599,6 +1488,8 @@ ORDER BY dd.entity_id, dd.currency_code, d.year, d.week;
 | 2025 | 27 | E01 | CNY | -806451.61 | 3 |
 | 2025 | 28 | E01 | CNY | -1048387.1 | 1 |
 | 2025 | 29 | E01 | CNY | -2258064.52 | 1 |
+
+</details>
 
 **Filter note for Query 4.** The weekly totals now include delayed payments. Before, some weeks looked weaker than they were because the delayed payments that settled in that week were missing. Across the whole period the group net flow went from +82M to +275M SGD (I did not compare the week-by-week shape). `returned` is still left out, see above.
 
@@ -1640,58 +1531,8 @@ Example output for E01 EUR (0 = Monday):
 **Filter note for Query 5.** This one changes the weekday picture the most. Delayed payments are not spread evenly: 12.5% of the payments settling on a Tuesday and 13.6% on a Wednesday are delayed, against 5.7% on Monday and 6.8% on Thursday, and none on Saturday. Leaving them out understated the Tuesday and Wednesday averages, so counting them gives a fairer payment-run rhythm. This matches `vw_05_weekday_pattern`.
 
 ### Query 6 - Views
-```SQL
-DROP VIEW IF EXISTS vw_05_daily_balance;
-CREATE VIEW vw_05_daily_balance AS
-SELECT b.date_id, a.entity_id, e.name AS entity_name, a.currency_code,
-       ROUND(SUM(b.closing_balance), 2)                    AS closing_balance,
-       ROUND(SUM(b.closing_balance * fx.rate_to_sgd), 2)   AS closing_balance_sgd
-FROM fact_balance b
-JOIN dim_account a   ON a.account_id = b.account_id
-JOIN dim_entity e    ON e.entity_id = a.entity_id
-JOIN fact_fx_rate fx ON fx.date_id = b.date_id AND fx.currency_code = b.currency_code
-GROUP BY b.date_id, a.entity_id, e.name, a.currency_code;
 
-DROP VIEW IF EXISTS vw_05_daily_net_flow;
-CREATE VIEW vw_05_daily_net_flow AS
-SELECT CAST(strftime('%Y%m%d', p.settled_ts) AS INTEGER) AS date_id,
-       a.entity_id, e.name AS entity_name, a.currency_code,
-       ROUND(SUM(CASE WHEN p.direction = 'IN' THEN p.amount ELSE -p.amount END), 2)         AS net_flow,
-       ROUND(SUM(p.amount), 2)                                                              AS gross_flow,
-       ROUND(SUM(CASE WHEN p.direction = 'IN' THEN p.amount_sgd ELSE -p.amount_sgd END), 2) AS net_flow_sgd,
-       ROUND(SUM(p.amount_sgd), 2)                                                          AS gross_flow_sgd
-FROM fact_payment p
-JOIN dim_account a ON a.account_id = p.account_id
-JOIN dim_entity e  ON e.entity_id = a.entity_id
-WHERE p.status IN ('completed', 'delayed') AND p.settled_ts IS NOT NULL   -- delayed payments settle too
-GROUP BY 1, 2, 3, 4;
-
-DROP VIEW IF EXISTS vw_05_weekly_net_flow;
-CREATE VIEW vw_05_weekly_net_flow AS
-SELECT date(d.date, '-' || d.day_of_week || ' days') AS week_start,      -- day_of_week: 0 = Monday
-       f.entity_id, f.entity_name, f.currency_code,
-       ROUND(SUM(f.net_flow), 2)     AS weekly_net_flow,
-       ROUND(SUM(f.net_flow_sgd), 2) AS weekly_net_flow_sgd,
-       COUNT(*)                      AS active_days
-FROM vw_05_daily_net_flow f
-JOIN dim_date d ON d.date_id = f.date_id
-GROUP BY week_start, f.entity_id, f.entity_name, f.currency_code;
-
-DROP VIEW IF EXISTS vw_05_weekday_pattern;
-CREATE VIEW vw_05_weekday_pattern AS
-SELECT d.day_of_week,
-       CASE d.day_of_week WHEN 0 THEN 'Mon' WHEN 1 THEN 'Tue' WHEN 2 THEN 'Wed' WHEN 3 THEN 'Thu'
-                          WHEN 4 THEN 'Fri' WHEN 5 THEN 'Sat' ELSE 'Sun' END AS weekday,
-       f.entity_id, f.entity_name, f.currency_code,
-       COUNT(*)                        AS n_days,
-       ROUND(AVG(f.net_flow), 2)       AS avg_net_flow,
-       ROUND(AVG(f.gross_flow), 2)     AS avg_gross_flow,
-       ROUND(AVG(f.net_flow_sgd), 2)   AS avg_net_flow_sgd,
-       ROUND(AVG(f.gross_flow_sgd), 2) AS avg_gross_flow_sgd
-FROM vw_05_daily_net_flow f
-JOIN dim_date d ON d.date_id = f.date_id
-GROUP BY d.day_of_week, f.entity_id, f.entity_name, f.currency_code;
-```
+➡️ **[See the SQL for these views in Step 3](#views-analysis-5)**
 
 ## Analysis 6: Cash Concentration
 This Group has 11 entities and 48 bank accounts in 6 currencies. Each account has its own balance, and cash could potentially be fragmented across these accounts. The group loses money from:
@@ -1722,6 +1563,9 @@ JOIN latest l      ON l.date_id = b.date_id
 JOIN dim_account a ON a.account_id = b.account_id
 ORDER BY balance DESC;
 ```
+
+<details>
+<summary>Query 1: show the output (48 rows)</summary>
 
 | account_id | entity_id | currency_code | is_pooled | balance | target_balance | excess_over_target | overdraft_limit | overdraft_drawn | headroom | idle_cash |
 |---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -1773,6 +1617,8 @@ ORDER BY balance DESC;
 | A001 | E01 | SGD | 0 | -39339410 | 260000 | -39599410 | 300000000 | 39339410 | 260660590 | 0.0 |
 | A002 | E01 | EUR | 0 | -70275631 | 186000 | -70461631 | 206897000 | 70275631 | 136621369 | 0.0 |
 | A046 | E01 | CNY | 0 | -323387097 | 0 | -323387097 | 1612903000 | 323387097 | 1289515903 | 0.0 |
+
+</details>
 
 From the results, we can clearly see which entities and accounts have idle cash that is over what the account needs (and can be moved and utilised elsewhere). If we ORDER BY idle_cash_sgd:
 1. A045 380,259,165 [USD]
@@ -1849,6 +1695,9 @@ Therefore, on this day, 298,016 SGD could have been offset from pooling
 
 ### Query 3 - Estimated benefit of pooling (per year)
 
+<details>
+<summary>Query 3: show the SQL (45 lines)</summary>
+
 ```SQL
 WITH acct AS (
     SELECT b.date_id, c.is_restricted, a.credit_rate, a.debit_rate,
@@ -1897,6 +1746,8 @@ GROUP BY dd.year
 ORDER BY dd.year;
 ```
 
+</details>
+
 | year | sum_idle_credit_interest_foregone_sgd | sum_overdraft_debit_interest_avoided | net_benefit_from_pooling |
 |---:|---:|---:|---:|
 | 2024 | 48.0 | 179.0 | 131.0 |
@@ -1914,6 +1765,9 @@ E01 is the in-house bank, and it holds almost all of the group's overdraft (3,65
 - **C:** E01 included, but overdraft in restricted currencies (CNY, INR) cannot be offset. This is the lower bound.
 
 `annual_saving_sgd` is the total saving divided by (days / 365), so it is a yearly figure.
+
+<details>
+<summary>Query 4: show the SQL (39 lines)</summary>
 
 ```SQL
 WITH acct AS (
@@ -1957,6 +1811,8 @@ GROUP BY name
 ORDER BY name;
 ```
 
+</details>
+
 | Scenario | Days overdrawn | Avg overdrawn (SGD) | Avg offsettable (SGD) | Annual saving (SGD) |
 |---|---|---|---|---|
 | A: subsidiaries only (excl. HQ) | 44 | 8,612 | 8,612 | 359 |
@@ -1976,96 +1832,7 @@ ORDER BY name;
 
 We save the results as 3 views for the dashboard: `vw_06_account_position` (latest balance per account), `vw_06_daily_idle_vs_overdrawn` (the idle vs overdrawn chart, with `overdrawn_hq_sgd` showing how much of the overdraft is E01) and `vw_06_pooling_benefit` (annual saving per scenario).
 
-```SQL
-DROP VIEW IF EXISTS vw_06_account_position;
-CREATE VIEW vw_06_account_position AS
-SELECT a.account_id, a.entity_id, e.name AS entity_name, a.currency_code, a.is_pooled, c.is_restricted,
-       b.date_id,
-       ROUND(b.closing_balance, 0)                                                AS balance,
-       ROUND(b.closing_balance * fx.rate_to_sgd, 0)                               AS balance_sgd,
-       ROUND(a.target_balance * fx.rate_to_sgd, 0)                                AS target_sgd,
-       ROUND(MAX(0, b.closing_balance - a.target_balance) * fx.rate_to_sgd, 0)    AS idle_sgd,
-       ROUND(MAX(0, -b.closing_balance) * fx.rate_to_sgd, 0)                      AS overdrawn_sgd,
-       ROUND((a.overdraft_limit + MIN(0, b.closing_balance)) * fx.rate_to_sgd, 0) AS headroom_sgd
-FROM fact_balance b
-JOIN dim_account a   ON a.account_id = b.account_id
-JOIN dim_entity e    ON e.entity_id = a.entity_id
-JOIN dim_currency c  ON c.currency_code = b.currency_code
-JOIN fact_fx_rate fx ON fx.date_id = b.date_id AND fx.currency_code = b.currency_code
-WHERE b.date_id = (SELECT MAX(date_id) FROM fact_balance);
-
-DROP VIEW IF EXISTS vw_06_daily_idle_vs_overdrawn;
-CREATE VIEW vw_06_daily_idle_vs_overdrawn AS
-WITH acct AS (
-    SELECT b.date_id, c.is_restricted, e.is_in_house_bank AS hq,
-           MAX(0, b.closing_balance - a.target_balance) * fx.rate_to_sgd AS idle_sgd,
-           MAX(0, -b.closing_balance)                   * fx.rate_to_sgd AS overdrawn_sgd
-    FROM fact_balance b
-    JOIN dim_account a   ON a.account_id = b.account_id
-    JOIN dim_entity e    ON e.entity_id = a.entity_id
-    JOIN dim_currency c  ON c.currency_code = b.currency_code
-    JOIN fact_fx_rate fx ON fx.date_id = b.date_id AND fx.currency_code = b.currency_code
-    WHERE a.is_pooled = 0
-),
-daily AS (
-    SELECT date_id,
-           SUM(CASE WHEN is_restricted = 0 THEN idle_sgd ELSE 0 END)  AS idle_movable_sgd,
-           SUM(CASE WHEN is_restricted = 1 THEN idle_sgd ELSE 0 END)  AS idle_trapped_sgd,
-           SUM(overdrawn_sgd)                                         AS overdrawn_sgd,
-           SUM(CASE WHEN hq = 1 THEN overdrawn_sgd ELSE 0 END)        AS overdrawn_hq_sgd
-    FROM acct
-    GROUP BY date_id
-)
-SELECT date_id,
-       ROUND(idle_movable_sgd, 0)                                  AS idle_movable_sgd,
-       ROUND(idle_trapped_sgd, 0)                                  AS idle_trapped_sgd,
-       ROUND(overdrawn_sgd, 0)                                     AS overdrawn_sgd,
-       ROUND(overdrawn_hq_sgd, 0)                                  AS overdrawn_hq_sgd,
-       ROUND(MIN(idle_movable_sgd, overdrawn_sgd), 0)              AS offsettable_sgd,
-       ROUND(overdrawn_sgd - MIN(idle_movable_sgd, overdrawn_sgd), 0) AS remaining_overdraft_sgd
-FROM daily;
-
-DROP VIEW IF EXISTS vw_06_pooling_benefit;
-CREATE VIEW vw_06_pooling_benefit AS
-WITH acct AS (
-    SELECT b.date_id, c.is_restricted, e.is_in_house_bank AS hq, a.credit_rate, a.debit_rate,
-           MAX(0, b.closing_balance - a.target_balance) * fx.rate_to_sgd AS idle_sgd,
-           MAX(0, -b.closing_balance)                   * fx.rate_to_sgd AS od_sgd
-    FROM fact_balance b
-    JOIN dim_account a   ON a.account_id = b.account_id
-    JOIN dim_entity e    ON e.entity_id = a.entity_id
-    JOIN dim_currency c  ON c.currency_code = b.currency_code
-    JOIN fact_fx_rate fx ON fx.date_id = b.date_id AND fx.currency_code = b.currency_code
-    WHERE a.is_pooled = 0
-),
-scen(name, incl_hq, od_unrestricted_only) AS (
-    VALUES ('A: subsidiaries only (excl. HQ)', 0, 0),
-           ('B: incl. HQ, all overdraft', 1, 0),
-           ('C: incl. HQ, unrestricted overdraft only', 1, 1)
-),
-daily AS (
-    SELECT s.name, x.date_id,
-           SUM(CASE WHEN x.is_restricted = 0 THEN x.idle_sgd ELSE 0 END)                AS idle_mov,
-           SUM(CASE WHEN x.is_restricted = 0 THEN x.idle_sgd * x.credit_rate ELSE 0 END) AS idle_x_cr,
-           SUM(CASE WHEN s.od_unrestricted_only = 1 AND x.is_restricted = 1 THEN 0 ELSE x.od_sgd END)            AS od,
-           SUM(CASE WHEN s.od_unrestricted_only = 1 AND x.is_restricted = 1 THEN 0 ELSE x.od_sgd * x.debit_rate END) AS od_x_db
-    FROM acct x JOIN scen s ON (s.incl_hq = 1 OR x.hq = 0)
-    GROUP BY s.name, x.date_id
-),
-cost AS (
-    SELECT name, date_id, od, MIN(idle_mov, od) AS offs,
-           MIN(idle_mov, od) * (COALESCE(od_x_db / NULLIF(od, 0), 0)
-                              - COALESCE(idle_x_cr / NULLIF(idle_mov, 0), 0)) / 365 AS saving
-    FROM daily
-)
-SELECT name                                          AS scenario,
-       SUM(od > 0)                                   AS days_overdrawn,
-       ROUND(AVG(od))                                AS avg_overdrawn_sgd,
-       ROUND(AVG(offs))                              AS avg_offsettable_sgd,
-       ROUND(SUM(saving) / (COUNT(*) / 365.0))       AS annual_saving_sgd
-FROM cost
-GROUP BY name;
-```
+➡️ **[See the SQL for these views in Step 3](#views-analysis-6)**
 
 ## Analysis 7: fx_exposure
 This analysis investigates which currencies we are long or short, by how much, and how much is hedged. We can find this by finding the net position in each currency that is foreign to the entity.
@@ -2095,6 +1862,9 @@ WITH fx_flows AS (
 SELECT * FROM fx_flows LIMIT 20;
 ```
 
+<details>
+<summary>Query 1: show the output (20 rows)</summary>
+
 | payment_id | entity_id | functional_currency | currency_code | settle_date | signed_amount | signed_sgd |
 |---|---|---|---|---|---:|---:|
 | P00008586 | E01 | SGD | USD | 2024-10-01 | -12007.92 | -16141.12 |
@@ -2117,6 +1887,8 @@ SELECT * FROM fx_flows LIMIT 20;
 | P00008642 | E06 | EUR | USD | 2024-10-01 | -2560.05 | -3441.23 |
 | P00008643 | E06 | EUR | GBP | 2024-10-01 | -115497.73 | -194746.38 |
 | P00008646 | E07 | EUR | GBP | 2024-10-01 | -9421.6 | -15886.22 |
+
+</details>
 
 ### Query 2 - Net position by currency and entity
 GROUP BY currency:
@@ -2174,6 +1946,9 @@ GROUP BY entity_id, currency_code
 LIMIT 21;
 ```
 
+<details>
+<summary>Query 2: show the output (21 rows)</summary>
+
 | entity_id | functional_currency | currency_code | net_sgd_m |
 |---|---|---|---:|
 | E01 | SGD | CNY | -20.7 |
@@ -2197,6 +1972,8 @@ LIMIT 21;
 | E05 | INR | GBP | 0.2 |
 | E05 | INR | SGD | 2.9 |
 | E05 | INR | USD | 39.6 |
+
+</details>
 
 ### Query 3 - Value at risk from a currency move
 We use a 90 day window to see the impact of loss if the currency moves 5% and 10%.
@@ -2237,6 +2014,9 @@ GROUP BY currency_code
 
 ### Query 4 - Hedged share
 We have the table fact_fx_hedge, and we can measure how much of the exposure the group already has that is covered by live forwards. A forward only counts between its trade date and its maturity date, so we need a reference date. We use 2026-09-15 and the 90 days of flows up to it.
+<details>
+<summary>Query 4: show the SQL (46 lines)</summary>
+
 ```SQL
     WITH asof AS (  -- Creating the reference date
     SELECT '2026-09-15' AS d, 20260915 AS d_id
@@ -2286,6 +2066,11 @@ LEFT JOIN hedged h ON h.entity_id = x.entity_id AND h.currency_code = x.currency
 ORDER BY x.entity_id, x.currency_code;
 ```
 
+</details>
+
+<details>
+<summary>Query 4: show the output (45 rows)</summary>
+
 | entity_id | currency_code | net_sgd_m | hedge_sgd_m | hedged_pct |
 |---|---|---:|---:|---:|
 | E01 | CNY | -4.2 | 0.6 | 0.15 |
@@ -2334,8 +2119,13 @@ ORDER BY x.entity_id, x.currency_code;
 | E11 | GBP | -0.1 | 0.0 | 0.0 |
 | E11 | SGD | 0.1 | 0.0 | 0.0 |
 
+</details>
+
 ### Query 5 - Hedged share by currency code
 Same as Query 4, rolled up to currency. We add up the amounts first and work out the % after, because percentages can't be added.
+
+<details>
+<summary>Query 5: show the SQL (52 lines)</summary>
 
 ```SQL
     WITH asof AS (  -- Creating the reference date
@@ -2392,6 +2182,8 @@ FROM hedged_by_entity_currency
 GROUP BY currency_code;
 ```
 
+</details>
+
 | currency_code | total_net_sgd_m | total_hedged_sgd_m | total_hedged_pct |
 |---|---:|---:|---:|
 | CNY | -31.1 | 5.7 | 0.18 |
@@ -2425,76 +2217,7 @@ We save the results as 3 views for the dashboard: `vw_07_net_position` (net posi
 
 Unlike Queries 4 and 5, the views don't pin a date. They use the last day a hedge is live (2026-09-01 here), so the numbers differ slightly from the tables above.
 
-```SQL
-DROP VIEW IF EXISTS vw_07_net_position;
-CREATE VIEW vw_07_net_position AS
-WITH asof AS (                        -- latest day the hedge book is live, capped at the last payment
-    SELECT m.id AS d_id,
-           date(substr(m.id, 1, 4) || '-' || substr(m.id, 5, 2) || '-' || substr(m.id, 7, 2)) AS d
-    FROM (SELECT MIN((SELECT MAX(trade_date_id) FROM fact_fx_hedge),
-                     (SELECT CAST(strftime('%Y%m%d', MAX(settled_ts)) AS INTEGER) FROM fact_payment)) AS id) m
-),
-fx_flows AS (
-    SELECT e.entity_id, e.name AS entity_name, e.functional_currency, p.currency_code,
-           CASE WHEN p.direction = 'IN' THEN p.amount_sgd ELSE -p.amount_sgd END AS signed_sgd
-    FROM fact_payment p
-    JOIN dim_account a ON a.account_id = p.account_id
-    JOIN dim_entity  e ON e.entity_id  = a.entity_id
-    WHERE p.is_intercompany = 0
-      AND p.status IN ('completed', 'delayed')
-      AND p.currency_code <> e.functional_currency
-      AND date(p.settled_ts) >  date((SELECT d FROM asof), '-90 days')
-      AND date(p.settled_ts) <= (SELECT d FROM asof)
-)
-SELECT f.entity_id, f.entity_name, f.functional_currency, f.currency_code,
-       (SELECT d_id FROM asof)                                  AS as_of_date_id,
-       ROUND(SUM(f.signed_sgd), 0)                              AS net_sgd,
-       CASE WHEN SUM(f.signed_sgd) >= 0 THEN 'LONG' ELSE 'SHORT' END AS position
-FROM fx_flows f
-GROUP BY f.entity_id, f.entity_name, f.functional_currency, f.currency_code;
-
-DROP VIEW IF EXISTS vw_07_sensitivity;
-CREATE VIEW vw_07_sensitivity AS
-SELECT currency_code,
-       as_of_date_id,
-       ROUND(SUM(net_sgd), 0)              AS net_sgd,
-       ROUND(ABS(SUM(net_sgd)), 0)         AS exposure_sgd,
-       ROUND(ABS(SUM(net_sgd)) * 0.05, 0)  AS loss_5pct_sgd,
-       ROUND(ABS(SUM(net_sgd)) * 0.10, 0)  AS loss_10pct_sgd
-FROM vw_07_net_position
-GROUP BY currency_code, as_of_date_id;
-
-DROP VIEW IF EXISTS vw_07_hedged_share;
-CREATE VIEW vw_07_hedged_share AS
-WITH asof AS (
-    SELECT MAX(as_of_date_id) AS d_id FROM vw_07_net_position
-),
-hedge_legs AS (                       -- one row per leg of each LIVE forward
-    SELECT h.entity_id, h.buy_currency AS currency_code, h.buy_amount AS signed_amount
-    FROM fact_fx_hedge h, asof
-    WHERE h.trade_date_id <= asof.d_id AND asof.d_id < h.maturity_date_id
-    UNION ALL
-    SELECT h.entity_id, h.sell_currency, -h.sell_amount
-    FROM fact_fx_hedge h, asof
-    WHERE h.trade_date_id <= asof.d_id AND asof.d_id < h.maturity_date_id
-),
-hedged AS (
-    SELECT l.entity_id, l.currency_code,
-           SUM(l.signed_amount * r.rate_to_sgd) AS hedge_sgd
-    FROM hedge_legs l
-    JOIN dim_entity  e ON e.entity_id = l.entity_id
-    JOIN asof          ON 1 = 1
-    JOIN fact_fx_rate r ON r.currency_code = l.currency_code AND r.date_id = asof.d_id
-    WHERE l.currency_code <> e.functional_currency
-    GROUP BY l.entity_id, l.currency_code
-)
-SELECT n.entity_id, n.entity_name, n.functional_currency, n.currency_code, n.as_of_date_id,
-       n.net_sgd,
-       ROUND(COALESCE(h.hedge_sgd, 0), 0)                                AS hedge_sgd,
-       ROUND(-COALESCE(h.hedge_sgd, 0) / NULLIF(n.net_sgd, 0), 4)        AS hedged_pct
-FROM vw_07_net_position n
-LEFT JOIN hedged h ON h.entity_id = n.entity_id AND h.currency_code = n.currency_code;
-```
+➡️ **[See the SQL for these views in Step 3](#views-analysis-7)**
 
 Result of `SELECT * FROM vw_07_sensitivity` (as of 2026-09-01):
 
@@ -2533,6 +2256,10 @@ WITH pay AS (
 )
 SELECT * FROM pay LIMIT 20;
 ```
+<details>
+<summary>Query 1: show the output (20 rows)</summary>
+
+```
 payment_id|account_id|counterparty_id|amount   |amount_sgd|currency_code|initiated_ts              |pay_date  |hour_utc|cpty_country|cpty_country_risk|first_seen_date|
 ----------+----------+---------------+---------+----------+-------------+--------------------------+----------+--------+------------+-----------------+---------------+
 P00008586 |A001      |C0075          | 12007.92|  16141.12|USD          |2024-10-01 01:05:00.000000|2024-10-01|       1|XB          |high             |2024-10-01     |
@@ -2555,9 +2282,15 @@ P00008606 |A007      |C0137          |    47.41|     47.41|SGD          |2024-10
 P00008607 |A007      |C0214          | 14670.96|  14670.96|SGD          |2024-10-01 04:33:00.000000|2024-10-01|       4|AU          |low              |2024-10-01     |
 P00008608 |A007      |C0214          |  7333.82|   7333.82|SGD          |2024-10-01 04:34:00.000000|2024-10-01|       4|AU          |low              |2024-10-01     |
 P00008609 |A007      |C0138          |   262.26|    262.26|SGD          |2024-10-01 04:35:00.000000|2024-10-01|       4|CN          |medium           |2024-10-01     |
+```
+
+</details>
 
 ### Query 2 - Filtering by rules
 For each rule, we can find out the total number of alerts flagged and the number of alerts flagged per day.
+<details>
+<summary>Query 2: show the SQL (63 lines)</summary>
+
 ```SQL
 WITH pay AS (
     SELECT p.payment_id,
@@ -2623,13 +2356,20 @@ WHERE cpty_country_risk = 'high'
 --WHERE CAST(strftime('%H', datetime(initiated_ts, tz_offset_min || ' minutes')) AS INTEGER)
 --      NOT BETWEEN 6 AND 21
 ```
+
+</details>
 Example for RULE 2, WHERE amount >= 10000...
+```
 n_alerts|alerts_per_day|
 --------+--------------+
      335|           0.5|
+```
 
 ### Query 3 - Risk score per payment
 Building off of query 2, we are able to score each rule that we built and give a score of 0/1 for each rule. We can then order by the total risk score DESC to find the payments with the highest risk.
+<details>
+<summary>Query 3: show the SQL (57 lines)</summary>
+
 ```SQL
 WITH pay AS (
     SELECT p.payment_id,
@@ -2689,6 +2429,12 @@ FROM (
 WHERE n_rules > 0
 ORDER BY n_rules DESC;
 ```
+
+</details>
+<details>
+<summary>Query 3: show the output (16 rows)</summary>
+
+```
 payment_id|pay_date  |rule_high_risk|rule_round|rule_structuring|rule_new_bene|rule_duplicate|rule_burst|rule_off_hours|n_rules|
 ----------+----------+--------------+----------+----------------+-------------+--------------+----------+--------------+-------+
 P00095397 |2026-06-18|             1|         0|               0|            0|             0|         1|             1|      3|
@@ -2707,78 +2453,16 @@ P00045415 |2025-07-03|             0|         1|               0|            0| 
 P00029112 |2025-03-06|             0|         0|               1|            0|             0|         1|             0|      2|
 P00098359 |2026-07-09|             0|         0|               1|            0|             0|         1|             0|      2|
 P00009260 |2024-10-07|             0|         0|               0|            1|             0|         0|             1|      2|
+```
+
+</details>
 
 These payments have a high risk score based on our analysis, and should be investigated for AML and fraudulent controls.
 
 ### Query 4 - Saving the alerts as a view and scoring them
 We save the combined rules as the view `vw_08_alerts` (one row per flagged payment, with its rule flags and `n_rules`), so the dashboard and Python read the same alerts.
-```sql
-DROP VIEW IF EXISTS vw_08_alerts;
-CREATE VIEW vw_08_alerts AS
-WITH pay AS (
-    SELECT p.payment_id,
-           p.counterparty_id,
-           c.name                AS counterparty_name,
-           e.name                AS entity_name,
-           p.amount,
-           p.amount_sgd,
-           p.currency_code,
-           p.initiated_ts,
-           date(p.initiated_ts)  AS pay_date,
-           c.country             AS cpty_country,
-           k.risk_rating         AS cpty_country_risk,
-           c.first_seen_date,
-           LAG(p.initiated_ts)  OVER dup AS prev_same_ts,
-           LEAD(p.initiated_ts) OVER dup AS next_same_ts,
-           COUNT(*) OVER (PARTITION BY p.counterparty_id, date(p.initiated_ts)) AS n_day,
-           COUNT(*) OVER (PARTITION BY p.counterparty_id)                       AS n_cpty,
-           CASE e.timezone WHEN 'Asia/Singapore'   THEN 480
-                           WHEN 'Asia/Shanghai'    THEN 480
-                           WHEN 'Asia/Kolkata'     THEN 330
-                           WHEN 'Europe/Berlin'    THEN 60
-                           WHEN 'Europe/Amsterdam' THEN 60
-                           WHEN 'Europe/London'    THEN 0
-                           WHEN 'America/New_York' THEN -300 END AS tz_offset_min
-    FROM fact_payment p
-    JOIN dim_counterparty c ON c.counterparty_id = p.counterparty_id
-    JOIN dim_country      k ON k.country_code    = c.country
-    JOIN dim_account      a ON a.account_id      = p.account_id
-    JOIN dim_entity       e ON e.entity_id       = a.entity_id
-    WHERE p.direction = 'OUT'
-      AND p.is_intercompany = 0
-    WINDOW dup AS (PARTITION BY p.counterparty_id, p.amount ORDER BY p.initiated_ts)
-),
-flagged AS (
-    SELECT payment_id, counterparty_id, counterparty_name, entity_name, cpty_country, amount, amount_sgd, currency_code, initiated_ts, pay_date,
-           CASE WHEN cpty_country_risk = 'high' THEN 1 ELSE 0 END                         AS rule_high_risk,
-           CASE WHEN amount >= 10000 AND amount = CAST(amount AS INTEGER)
-                 AND CAST(amount AS INTEGER) % 1000 = 0 THEN 1 ELSE 0 END                 AS rule_round,
-           CASE WHEN amount_sgd >= 18000 AND amount_sgd < 20000 THEN 1 ELSE 0 END        AS rule_structuring,
-           CASE WHEN julianday(pay_date) - julianday(first_seen_date) <= 7
-                 AND amount_sgd >= 50000 THEN 1 ELSE 0 END                                AS rule_new_bene,
-           CASE WHEN julianday(initiated_ts) - julianday(prev_same_ts) <= 1
-                  OR julianday(next_same_ts) - julianday(initiated_ts) <= 1 THEN 1 ELSE 0 END AS rule_duplicate,
-           CASE WHEN n_day >= 10
-                 AND n_day >= 5 * n_cpty * 1.0 / (SELECT COUNT(DISTINCT pay_date) FROM pay) THEN 1 ELSE 0 END AS rule_burst,
-           CASE WHEN CAST(strftime('%H', datetime(initiated_ts, tz_offset_min || ' minutes')) AS INTEGER)
-                     NOT BETWEEN 6 AND 21 THEN 1 ELSE 0 END                               AS rule_off_hours
-    FROM pay
-)
-SELECT *,
-       rule_high_risk + rule_round + rule_structuring + rule_new_bene
-     + rule_duplicate + rule_burst + rule_off_hours AS n_rules,
-       -- readable list of the rules that fired, for tooltips and tables
-       TRIM(CASE WHEN rule_high_risk  = 1 THEN 'high-risk country, ' ELSE '' END
-         || CASE WHEN rule_round      = 1 THEN 'round amount, '      ELSE '' END
-         || CASE WHEN rule_structuring = 1 THEN 'structuring, '      ELSE '' END
-         || CASE WHEN rule_new_bene   = 1 THEN 'new beneficiary, '   ELSE '' END
-         || CASE WHEN rule_duplicate  = 1 THEN 'duplicate, '         ELSE '' END
-         || CASE WHEN rule_burst      = 1 THEN 'burst, '             ELSE '' END
-         || CASE WHEN rule_off_hours  = 1 THEN 'off-hours, '        ELSE '' END, ', ') AS rules_triggered
-FROM flagged
-WHERE rule_high_risk + rule_round + rule_structuring + rule_new_bene
-    + rule_duplicate + rule_burst + rule_off_hours > 0;
-```
+
+➡️ **[See the SQL for these views in Step 3](#views-analysis-8)**
 
 #### What "scoring" means
 Because the data is synthetic, the simulator secretly planted the anomalies and wrote them to `answer_key/business_anomalies.parquet`. Scoring checks our rules against that list:
@@ -2867,6 +2551,722 @@ Run steps 2 to 4 again whenever I edit a view in the SQL files or rebuild the da
 | 6 Cash concentration | `vw_06_account_position`, `vw_06_daily_idle_vs_overdrawn`, `vw_06_pooling_benefit` | idle vs overdrawn cash, pooling saving per scenario |
 | 7 FX exposure | `vw_07_net_position`, `vw_07_sensitivity`, `vw_07_hedged_share` | long/short position, loss from a 5% and 10% move, hedged share |
 | 8 Anomalies | `vw_08_alerts`, `08_rule_scores` | alerts per rule, precision and recall per rule, the alert list |
+
+## The view SQL
+
+Each analysis ends with a link that jumps here. The blocks below are copies of the views in `sql/analyses/*.sql`, which stay the source of truth: `views.py` (step 2 above) runs those files, not this page. Click a view to expand its SQL.
+
+<a id="views-analysis-1"></a>
+
+### Analysis 1: Money Movement
+
+<details>
+<summary><code>vw_01_currency</code>: value and number of payments per currency</summary>
+
+```sql
+DROP VIEW IF EXISTS vw_01_currency;
+CREATE VIEW vw_01_currency AS
+SELECT p.currency_code,
+       COUNT(*)                          AS n_payments,
+       ROUND(SUM(p.amount_sgd) / 1e6, 1) AS value_sgd_m
+FROM fact_payment p
+WHERE p.is_intercompany = 0
+  AND p.status IN ('completed', 'delayed')
+GROUP BY p.currency_code;
+```
+
+</details>
+
+<details>
+<summary><code>vw_01_corridor</code>: cross-border corridors by value</summary>
+
+```sql
+DROP VIEW IF EXISTS vw_01_corridor;
+CREATE VIEW vw_01_corridor AS
+SELECT p.sender_country || ' -> ' || p.receiver_country AS corridor,
+       p.sender_country,
+       p.receiver_country,
+       COUNT(*)                          AS n_payments,
+       ROUND(SUM(p.amount_sgd) / 1e6, 1) AS value_sgd_m
+FROM fact_payment p
+WHERE p.is_intercompany = 0
+  AND p.status IN ('completed', 'delayed')
+  AND p.sender_country <> p.receiver_country
+GROUP BY p.sender_country, p.receiver_country;
+```
+
+</details>
+
+<details>
+<summary><code>vw_01_entity</code>: inflow, outflow and net per entity</summary>
+
+```sql
+DROP VIEW IF EXISTS vw_01_entity;
+CREATE VIEW vw_01_entity AS
+SELECT e.entity_id,
+       e.name AS entity_name,
+       ROUND(SUM(CASE WHEN p.direction = 'IN'  THEN p.amount_sgd ELSE 0 END), 2) AS inflow_sgd,
+       ROUND(SUM(CASE WHEN p.direction = 'OUT' THEN p.amount_sgd ELSE 0 END), 2) AS outflow_sgd,
+       ROUND(SUM(CASE WHEN p.direction = 'IN' THEN p.amount_sgd ELSE -p.amount_sgd END), 2) AS net_inflow_sgd
+FROM fact_payment p
+JOIN dim_account a ON a.account_id = p.account_id
+JOIN dim_entity  e ON e.entity_id  = a.entity_id
+WHERE p.is_intercompany = 0
+  AND p.status IN ('completed', 'delayed')
+GROUP BY e.entity_id, e.name;
+```
+
+</details>
+
+<details>
+<summary><code>vw_01_monthly</code>: monthly value, inflow, outflow and net</summary>
+
+```sql
+DROP VIEW IF EXISTS vw_01_monthly;
+CREATE VIEW vw_01_monthly AS
+SELECT strftime('%Y-%m', p.initiated_ts)    AS month,
+       date(p.initiated_ts, 'start of month') AS month_start,      -- a real date: Tableau needs one for a time axis
+       COUNT(*)                          AS n_payments,
+       ROUND(SUM(p.amount_sgd) / 1e6, 1) AS value_sgd_m,
+       ROUND(SUM(CASE WHEN p.direction = 'IN'  THEN p.amount_sgd ELSE 0 END) / 1e6, 1) AS inflow_sgd_m,
+       ROUND(SUM(CASE WHEN p.direction = 'OUT' THEN p.amount_sgd ELSE 0 END) / 1e6, 1) AS outflow_sgd_m,
+       ROUND(SUM(CASE WHEN p.direction = 'IN' THEN p.amount_sgd ELSE -p.amount_sgd END) / 1e6, 1) AS net_inflow_sgd_m
+FROM fact_payment p
+WHERE p.is_intercompany = 0
+  AND p.status IN ('completed', 'delayed')
+GROUP BY month;
+```
+
+</details>
+
+↩️ [Back to Analysis 1](#analysis-1-money-movement)
+
+<a id="views-analysis-2"></a>
+
+### Analysis 2: Cross Border Payments
+
+<details>
+<summary><code>vw_02_corridor_scorecard</code>: speed and failure rate per corridor</summary>
+
+```sql
+DROP VIEW IF EXISTS vw_02_corridor_scorecard;
+CREATE VIEW vw_02_corridor_scorecard AS
+WITH xb AS (
+    SELECT p.sender_country || ' -> ' || p.receiver_country AS corridor,
+           p.sender_country,
+           p.receiver_country,
+           p.amount_sgd,
+           (julianday(p.settled_ts) - julianday(p.initiated_ts)) * 24 AS hours_to_settle,
+           CASE WHEN p.status IN ('rejected', 'returned') THEN 1 ELSE 0 END AS is_failed
+    FROM fact_payment p
+    WHERE p.is_intercompany = 0
+      AND p.sender_country <> p.receiver_country
+      AND p.status <> 'pending'
+)
+SELECT corridor,
+       sender_country,
+       receiver_country,
+       COUNT(*)                                        AS n_payments,
+       ROUND(SUM(amount_sgd) / 1e6, 1)                 AS value_sgd_m,
+       ROUND(AVG(hours_to_settle), 1)                  AS avg_hours,
+       ROUND(100.0 * AVG(hours_to_settle > 48), 1)     AS pct_over_48h,
+       ROUND(100.0 * SUM(is_failed) / COUNT(*), 1)     AS failure_pct
+FROM xb
+GROUP BY corridor, sender_country, receiver_country
+HAVING n_payments >= 200;
+```
+
+</details>
+
+↩️ [Back to Analysis 2](#analysis-2-cross-border-payments)
+
+<a id="views-analysis-3"></a>
+
+### Analysis 3: Payment Efficiency
+
+<details>
+<summary><code>vw_03_channel_efficiency</code>: STP, repair and missed cut-off rate by channel</summary>
+
+```sql
+DROP VIEW IF EXISTS vw_03_channel_efficiency;
+CREATE VIEW vw_03_channel_efficiency AS
+WITH eff AS (
+    SELECT p.channel,
+           p.is_stp,
+           p.repair_count,
+           p.missed_cutoff
+    FROM fact_payment p
+    WHERE p.is_intercompany = 0
+      AND p.direction = 'OUT'
+      AND p.status IN ('completed', 'delayed')
+)
+SELECT channel,
+       COUNT(*) AS n,
+       ROUND(100.0 * AVG(is_stp), 1)            AS stp_pct,
+       ROUND(100.0 * AVG(repair_count > 0), 1)  AS repaired_pct,
+       ROUND(100.0 * AVG(missed_cutoff), 1)     AS missed_cutoff_pct
+FROM eff
+GROUP BY channel;
+```
+
+</details>
+
+<details>
+<summary><code>vw_03_rail_timing</code>: average hours and share over 48 hours by rail</summary>
+
+```sql
+DROP VIEW IF EXISTS vw_03_rail_timing;
+CREATE VIEW vw_03_rail_timing AS
+WITH eff AS (
+    SELECT t.rail,
+           (julianday(p.settled_ts) - julianday(p.initiated_ts)) * 24 AS hours_total
+    FROM fact_payment p
+    JOIN dim_payment_type t ON t.type_id = p.type_id
+    WHERE p.is_intercompany = 0
+      AND p.direction = 'OUT'
+      AND p.status IN ('completed', 'delayed')
+)
+SELECT rail,
+       COUNT(*) AS n,
+       ROUND(AVG(hours_total), 1)                AS avg_hours,
+       ROUND(100.0 * AVG(hours_total > 48), 1)   AS pct_over_48h
+FROM eff
+GROUP BY rail;
+```
+
+</details>
+
+<details>
+<summary><code>vw_03_stage_durations</code>: average hours in each processing stage</summary>
+
+```sql
+DROP VIEW IF EXISTS vw_03_stage_durations;
+CREATE VIEW vw_03_stage_durations AS          -- one row per stage, so it draws as a bar chart
+WITH ev AS (
+    SELECT payment_id,
+           MIN(CASE WHEN status = 'CREATED'   THEN event_ts END) AS created_ts,
+           MIN(CASE WHEN status = 'APPROVED'  THEN event_ts END) AS approved_ts,
+           MIN(CASE WHEN status = 'SUBMITTED' THEN event_ts END) AS submitted_ts,
+           MIN(CASE WHEN status = 'SETTLED'   THEN event_ts END) AS settled_ts
+    FROM fact_payment_event
+    GROUP BY payment_id
+),
+done AS (
+    SELECT * FROM ev
+    WHERE approved_ts IS NOT NULL AND submitted_ts IS NOT NULL AND settled_ts IS NOT NULL
+)
+SELECT 1 AS stage_order, 'Created to approved'   AS stage, COUNT(*) AS n,
+       ROUND(AVG((julianday(approved_ts)  - julianday(created_ts))   * 24), 1) AS avg_hours FROM done
+UNION ALL
+SELECT 2, 'Approved to submitted', COUNT(*),
+       ROUND(AVG((julianday(submitted_ts) - julianday(approved_ts))  * 24), 1) FROM done
+UNION ALL
+SELECT 3, 'Submitted to settled', COUNT(*),
+       ROUND(AVG((julianday(settled_ts)   - julianday(submitted_ts)) * 24), 1) FROM done;
+```
+
+</details>
+
+↩️ [Back to Analysis 3](#analysis-3-payment-efficiency)
+
+<a id="views-analysis-4"></a>
+
+### Analysis 4: Payment Failures
+
+<details>
+<summary><code>vw_04_failure_pareto</code>: failure reasons ranked, with cumulative share</summary>
+
+```sql
+DROP VIEW IF EXISTS vw_04_failure_pareto;
+CREATE VIEW vw_04_failure_pareto AS
+SELECT p.failure_reason,
+       dfr.description AS failure_description,
+       dfr.category,
+       COUNT(*)        AS n_payment_failures,
+       ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER (), 1) AS pct_of_failures,
+       ROUND(100.0 * SUM(COUNT(*)) OVER (ORDER BY COUNT(*) DESC) / SUM(COUNT(*)) OVER (), 1) AS cum_pct,
+       ROUND(SUM(p.amount_sgd) / 1e6, 2) AS failed_value_sgd_m
+FROM fact_payment p
+JOIN dim_failure_reason dfr ON p.failure_reason = dfr.reason_code
+WHERE p.is_intercompany = 0
+  AND p.direction = 'OUT'
+  AND p.status IN ('rejected', 'returned')
+GROUP BY p.failure_reason, dfr.description, dfr.category;
+```
+
+</details>
+
+<details>
+<summary><code>vw_04_repeat_offenders</code>: counterparties with 5 or more failed payments</summary>
+
+```sql
+DROP VIEW IF EXISTS vw_04_repeat_offenders;
+CREATE VIEW vw_04_repeat_offenders AS
+SELECT p.counterparty_id,
+       cp.name,
+       cp.counterparty_type,
+       cp.country,
+       cp.risk_rating,
+       ROUND(cp.data_quality_score, 2) AS data_quality_score,
+       COUNT(*) AS n_payments,
+       SUM(p.status IN ('rejected', 'returned')) AS n_failed,
+       ROUND(100.0 * AVG(p.status IN ('rejected', 'returned')), 1) AS fail_rate_pct,
+       ROUND(SUM(CASE WHEN p.status IN ('rejected', 'returned') THEN p.amount_sgd ELSE 0 END) / 1e6, 2)
+                                                                   AS failed_value_sgd_m
+FROM fact_payment p
+JOIN dim_counterparty cp ON p.counterparty_id = cp.counterparty_id
+WHERE p.is_intercompany = 0
+  AND p.direction = 'OUT'
+  AND p.status <> 'pending'
+GROUP BY p.counterparty_id, cp.name, cp.counterparty_type, cp.country, cp.risk_rating, cp.data_quality_score
+HAVING n_failed >= 5;
+```
+
+</details>
+
+<details>
+<summary><code>vw_04_risk_rating</code>: failure rate by counterparty risk rating</summary>
+
+```sql
+DROP VIEW IF EXISTS vw_04_risk_rating;
+CREATE VIEW vw_04_risk_rating AS
+SELECT cp.risk_rating,
+       COUNT(*) AS n_payments,
+       SUM(p.status IN ('rejected', 'returned')) AS n_failed,
+       ROUND(100.0 * AVG(p.status IN ('rejected', 'returned')), 1) AS fail_rate_pct,
+       ROUND(SUM(CASE WHEN p.status IN ('rejected', 'returned') THEN p.amount_sgd ELSE 0 END) / 1e6, 2)
+                                                                   AS failed_value_sgd_m
+FROM fact_payment p
+JOIN dim_counterparty cp ON p.counterparty_id = cp.counterparty_id
+WHERE p.is_intercompany = 0
+  AND p.direction = 'OUT'
+  AND p.status <> 'pending'
+GROUP BY cp.risk_rating;
+```
+
+</details>
+
+<details>
+<summary><code>vw_04_failure_rail</code>: failure rate by rail</summary>
+
+```sql
+DROP VIEW IF EXISTS vw_04_failure_rail;
+CREATE VIEW vw_04_failure_rail AS
+SELECT t.rail,
+       COUNT(*)                                                    AS n_payments,
+       SUM(p.status IN ('rejected', 'returned'))                   AS n_failed,
+       ROUND(100.0 * AVG(p.status IN ('rejected', 'returned')), 2) AS fail_rate_pct,
+       ROUND(SUM(CASE WHEN p.status IN ('rejected', 'returned') THEN p.amount_sgd ELSE 0 END) / 1e6, 2)
+                                                                   AS failed_value_sgd_m
+FROM fact_payment p
+JOIN dim_payment_type t ON t.type_id = p.type_id
+WHERE p.is_intercompany = 0
+  AND p.direction = 'OUT'
+  AND p.status <> 'pending'
+GROUP BY t.rail;
+```
+
+</details>
+
+<details>
+<summary><code>vw_04_failure_trend</code>: failure rate by month</summary>
+
+```sql
+DROP VIEW IF EXISTS vw_04_failure_trend;
+CREATE VIEW vw_04_failure_trend AS
+SELECT strftime('%Y-%m', p.initiated_ts)                           AS month,
+       date(p.initiated_ts, 'start of month')                      AS month_start,   -- a real date for the time axis
+       COUNT(*)                                                    AS n_payments,
+       SUM(p.status IN ('rejected', 'returned'))                   AS n_failed,
+       ROUND(100.0 * AVG(p.status IN ('rejected', 'returned')), 2) AS fail_rate_pct,
+       ROUND(SUM(CASE WHEN p.status IN ('rejected', 'returned') THEN p.amount_sgd ELSE 0 END) / 1e6, 2)
+                                                                   AS failed_value_sgd_m
+FROM fact_payment p
+WHERE p.is_intercompany = 0
+  AND p.direction = 'OUT'
+  AND p.status <> 'pending'
+GROUP BY month;
+```
+
+</details>
+
+↩️ [Back to Analysis 4](#analysis-4-payment-failures)
+
+<a id="views-analysis-5"></a>
+
+### Analysis 5: Liquidity Forecast
+
+<details>
+<summary><code>vw_05_daily_balance</code>: closing balance per day, entity and currency</summary>
+
+```sql
+DROP VIEW IF EXISTS vw_05_daily_balance;
+CREATE VIEW vw_05_daily_balance AS
+SELECT b.date_id, a.entity_id, e.name AS entity_name, a.currency_code,
+       ROUND(SUM(b.closing_balance), 2)                    AS closing_balance,
+       ROUND(SUM(b.closing_balance * fx.rate_to_sgd), 2)   AS closing_balance_sgd
+FROM fact_balance b
+JOIN dim_account a   ON a.account_id = b.account_id
+JOIN dim_entity e    ON e.entity_id = a.entity_id
+JOIN fact_fx_rate fx ON fx.date_id = b.date_id AND fx.currency_code = b.currency_code
+GROUP BY b.date_id, a.entity_id, e.name, a.currency_code;
+```
+
+</details>
+
+<details>
+<summary><code>vw_05_daily_net_flow</code>: settled net and gross flow per day</summary>
+
+```sql
+DROP VIEW IF EXISTS vw_05_daily_net_flow;
+CREATE VIEW vw_05_daily_net_flow AS
+SELECT CAST(strftime('%Y%m%d', p.settled_ts) AS INTEGER) AS date_id,
+       a.entity_id, e.name AS entity_name, a.currency_code,
+       ROUND(SUM(CASE WHEN p.direction = 'IN' THEN p.amount ELSE -p.amount END), 2)         AS net_flow,
+       ROUND(SUM(p.amount), 2)                                                              AS gross_flow,
+       ROUND(SUM(CASE WHEN p.direction = 'IN' THEN p.amount_sgd ELSE -p.amount_sgd END), 2) AS net_flow_sgd,
+       ROUND(SUM(p.amount_sgd), 2)                                                          AS gross_flow_sgd
+FROM fact_payment p
+JOIN dim_account a ON a.account_id = p.account_id
+JOIN dim_entity e  ON e.entity_id = a.entity_id
+WHERE p.status IN ('completed', 'delayed') AND p.settled_ts IS NOT NULL   -- delayed payments settle too
+GROUP BY 1, 2, 3, 4;
+```
+
+</details>
+
+<details>
+<summary><code>vw_05_weekly_net_flow</code>: net flow per week</summary>
+
+```sql
+DROP VIEW IF EXISTS vw_05_weekly_net_flow;
+CREATE VIEW vw_05_weekly_net_flow AS
+SELECT date(d.date, '-' || d.day_of_week || ' days') AS week_start,      -- day_of_week: 0 = Monday
+       f.entity_id, f.entity_name, f.currency_code,
+       ROUND(SUM(f.net_flow), 2)     AS weekly_net_flow,
+       ROUND(SUM(f.net_flow_sgd), 2) AS weekly_net_flow_sgd,
+       COUNT(*)                      AS active_days
+FROM vw_05_daily_net_flow f
+JOIN dim_date d ON d.date_id = f.date_id
+GROUP BY week_start, f.entity_id, f.entity_name, f.currency_code;
+```
+
+</details>
+
+<details>
+<summary><code>vw_05_weekday_pattern</code>: average flow by day of the week</summary>
+
+```sql
+DROP VIEW IF EXISTS vw_05_weekday_pattern;
+CREATE VIEW vw_05_weekday_pattern AS
+SELECT d.day_of_week,
+       CASE d.day_of_week WHEN 0 THEN 'Mon' WHEN 1 THEN 'Tue' WHEN 2 THEN 'Wed' WHEN 3 THEN 'Thu'
+                          WHEN 4 THEN 'Fri' WHEN 5 THEN 'Sat' ELSE 'Sun' END AS weekday,
+       f.entity_id, f.entity_name, f.currency_code,
+       COUNT(*)                        AS n_days,
+       ROUND(AVG(f.net_flow), 2)       AS avg_net_flow,
+       ROUND(AVG(f.gross_flow), 2)     AS avg_gross_flow,
+       ROUND(AVG(f.net_flow_sgd), 2)   AS avg_net_flow_sgd,
+       ROUND(AVG(f.gross_flow_sgd), 2) AS avg_gross_flow_sgd
+FROM vw_05_daily_net_flow f
+JOIN dim_date d ON d.date_id = f.date_id
+GROUP BY d.day_of_week, f.entity_id, f.entity_name, f.currency_code;
+```
+
+</details>
+
+↩️ [Back to Analysis 5](#analysis-5-liquidity-forecast)
+
+<a id="views-analysis-6"></a>
+
+### Analysis 6: Cash Concentration
+
+<details>
+<summary><code>vw_06_account_position</code>: latest balance, idle cash and overdraft per account</summary>
+
+```sql
+DROP VIEW IF EXISTS vw_06_account_position;
+CREATE VIEW vw_06_account_position AS
+SELECT a.account_id, a.entity_id, e.name AS entity_name, a.currency_code, a.is_pooled, c.is_restricted,
+       b.date_id,
+       ROUND(b.closing_balance, 0)                                                AS balance,
+       ROUND(b.closing_balance * fx.rate_to_sgd, 0)                               AS balance_sgd,
+       ROUND(a.target_balance * fx.rate_to_sgd, 0)                                AS target_sgd,
+       ROUND(MAX(0, b.closing_balance - a.target_balance) * fx.rate_to_sgd, 0)    AS idle_sgd,
+       ROUND(MAX(0, -b.closing_balance) * fx.rate_to_sgd, 0)                      AS overdrawn_sgd,
+       ROUND((a.overdraft_limit + MIN(0, b.closing_balance)) * fx.rate_to_sgd, 0) AS headroom_sgd
+FROM fact_balance b
+JOIN dim_account a   ON a.account_id = b.account_id
+JOIN dim_entity e    ON e.entity_id = a.entity_id
+JOIN dim_currency c  ON c.currency_code = b.currency_code
+JOIN fact_fx_rate fx ON fx.date_id = b.date_id AND fx.currency_code = b.currency_code
+WHERE b.date_id = (SELECT MAX(date_id) FROM fact_balance);
+```
+
+</details>
+
+<details>
+<summary><code>vw_06_daily_idle_vs_overdrawn</code>: idle vs overdrawn cash per day</summary>
+
+```sql
+DROP VIEW IF EXISTS vw_06_daily_idle_vs_overdrawn;
+CREATE VIEW vw_06_daily_idle_vs_overdrawn AS
+WITH acct AS (
+    SELECT b.date_id, c.is_restricted, e.is_in_house_bank AS hq,
+           MAX(0, b.closing_balance - a.target_balance) * fx.rate_to_sgd AS idle_sgd,
+           MAX(0, -b.closing_balance)                   * fx.rate_to_sgd AS overdrawn_sgd
+    FROM fact_balance b
+    JOIN dim_account a   ON a.account_id = b.account_id
+    JOIN dim_entity e    ON e.entity_id = a.entity_id
+    JOIN dim_currency c  ON c.currency_code = b.currency_code
+    JOIN fact_fx_rate fx ON fx.date_id = b.date_id AND fx.currency_code = b.currency_code
+    WHERE a.is_pooled = 0
+),
+daily AS (
+    SELECT date_id,
+           SUM(CASE WHEN is_restricted = 0 THEN idle_sgd ELSE 0 END)  AS idle_movable_sgd,
+           SUM(CASE WHEN is_restricted = 1 THEN idle_sgd ELSE 0 END)  AS idle_trapped_sgd,
+           SUM(overdrawn_sgd)                                         AS overdrawn_sgd,
+           SUM(CASE WHEN hq = 1 THEN overdrawn_sgd ELSE 0 END)        AS overdrawn_hq_sgd
+    FROM acct
+    GROUP BY date_id
+)
+SELECT date_id,
+       ROUND(idle_movable_sgd, 0)                                  AS idle_movable_sgd,
+       ROUND(idle_trapped_sgd, 0)                                  AS idle_trapped_sgd,
+       ROUND(overdrawn_sgd, 0)                                     AS overdrawn_sgd,
+       ROUND(overdrawn_hq_sgd, 0)                                  AS overdrawn_hq_sgd,
+       ROUND(MIN(idle_movable_sgd, overdrawn_sgd), 0)              AS offsettable_sgd,
+       ROUND(overdrawn_sgd - MIN(idle_movable_sgd, overdrawn_sgd), 0) AS remaining_overdraft_sgd
+FROM daily;
+```
+
+</details>
+
+<details>
+<summary><code>vw_06_pooling_benefit</code>: annual saving per pooling scenario</summary>
+
+```sql
+DROP VIEW IF EXISTS vw_06_pooling_benefit;
+CREATE VIEW vw_06_pooling_benefit AS
+WITH acct AS (
+    SELECT b.date_id, c.is_restricted, e.is_in_house_bank AS hq, a.credit_rate, a.debit_rate,
+           MAX(0, b.closing_balance - a.target_balance) * fx.rate_to_sgd AS idle_sgd,
+           MAX(0, -b.closing_balance)                   * fx.rate_to_sgd AS od_sgd
+    FROM fact_balance b
+    JOIN dim_account a   ON a.account_id = b.account_id
+    JOIN dim_entity e    ON e.entity_id = a.entity_id
+    JOIN dim_currency c  ON c.currency_code = b.currency_code
+    JOIN fact_fx_rate fx ON fx.date_id = b.date_id AND fx.currency_code = b.currency_code
+    WHERE a.is_pooled = 0
+),
+scen(name, incl_hq, od_unrestricted_only) AS (
+    VALUES ('A: subsidiaries only (excl. HQ)', 0, 0),
+           ('B: incl. HQ, all overdraft', 1, 0),
+           ('C: incl. HQ, unrestricted overdraft only', 1, 1)
+),
+daily AS (
+    SELECT s.name, x.date_id,
+           SUM(CASE WHEN x.is_restricted = 0 THEN x.idle_sgd ELSE 0 END)                AS idle_mov,
+           SUM(CASE WHEN x.is_restricted = 0 THEN x.idle_sgd * x.credit_rate ELSE 0 END) AS idle_x_cr,
+           SUM(CASE WHEN s.od_unrestricted_only = 1 AND x.is_restricted = 1 THEN 0 ELSE x.od_sgd END)            AS od,
+           SUM(CASE WHEN s.od_unrestricted_only = 1 AND x.is_restricted = 1 THEN 0 ELSE x.od_sgd * x.debit_rate END) AS od_x_db
+    FROM acct x JOIN scen s ON (s.incl_hq = 1 OR x.hq = 0)
+    GROUP BY s.name, x.date_id
+),
+cost AS (
+    SELECT name, date_id, od, MIN(idle_mov, od) AS offs,
+           MIN(idle_mov, od) * (COALESCE(od_x_db / NULLIF(od, 0), 0)
+                              - COALESCE(idle_x_cr / NULLIF(idle_mov, 0), 0)) / 365 AS saving
+    FROM daily
+)
+SELECT name                                          AS scenario,
+       SUM(od > 0)                                   AS days_overdrawn,
+       ROUND(AVG(od))                                AS avg_overdrawn_sgd,
+       ROUND(AVG(offs))                              AS avg_offsettable_sgd,
+       ROUND(SUM(saving) / (COUNT(*) / 365.0))       AS annual_saving_sgd
+FROM cost
+GROUP BY name;
+```
+
+</details>
+
+↩️ [Back to Analysis 6](#analysis-6-cash-concentration)
+
+<a id="views-analysis-7"></a>
+
+### Analysis 7: FX Exposure
+
+<details>
+<summary><code>vw_07_net_position</code>: long or short position per entity and currency</summary>
+
+```sql
+DROP VIEW IF EXISTS vw_07_net_position;
+CREATE VIEW vw_07_net_position AS
+WITH asof AS (                        -- latest day the hedge book is live, capped at the last payment
+    SELECT m.id AS d_id,
+           date(substr(m.id, 1, 4) || '-' || substr(m.id, 5, 2) || '-' || substr(m.id, 7, 2)) AS d
+    FROM (SELECT MIN((SELECT MAX(trade_date_id) FROM fact_fx_hedge),
+                     (SELECT CAST(strftime('%Y%m%d', MAX(settled_ts)) AS INTEGER) FROM fact_payment)) AS id) m
+),
+fx_flows AS (
+    SELECT e.entity_id, e.name AS entity_name, e.functional_currency, p.currency_code,
+           CASE WHEN p.direction = 'IN' THEN p.amount_sgd ELSE -p.amount_sgd END AS signed_sgd
+    FROM fact_payment p
+    JOIN dim_account a ON a.account_id = p.account_id
+    JOIN dim_entity  e ON e.entity_id  = a.entity_id
+    WHERE p.is_intercompany = 0
+      AND p.status IN ('completed', 'delayed')
+      AND p.currency_code <> e.functional_currency
+      AND date(p.settled_ts) >  date((SELECT d FROM asof), '-90 days')
+      AND date(p.settled_ts) <= (SELECT d FROM asof)
+)
+SELECT f.entity_id, f.entity_name, f.functional_currency, f.currency_code,
+       (SELECT d_id FROM asof)                                  AS as_of_date_id,
+       ROUND(SUM(f.signed_sgd), 0)                              AS net_sgd,
+       CASE WHEN SUM(f.signed_sgd) >= 0 THEN 'LONG' ELSE 'SHORT' END AS position
+FROM fx_flows f
+GROUP BY f.entity_id, f.entity_name, f.functional_currency, f.currency_code;
+```
+
+</details>
+
+<details>
+<summary><code>vw_07_sensitivity</code>: loss from a 5% and 10% currency move</summary>
+
+```sql
+DROP VIEW IF EXISTS vw_07_sensitivity;
+CREATE VIEW vw_07_sensitivity AS
+SELECT currency_code,
+       as_of_date_id,
+       ROUND(SUM(net_sgd), 0)              AS net_sgd,
+       ROUND(ABS(SUM(net_sgd)), 0)         AS exposure_sgd,
+       ROUND(ABS(SUM(net_sgd)) * 0.05, 0)  AS loss_5pct_sgd,
+       ROUND(ABS(SUM(net_sgd)) * 0.10, 0)  AS loss_10pct_sgd
+FROM vw_07_net_position
+GROUP BY currency_code, as_of_date_id;
+```
+
+</details>
+
+<details>
+<summary><code>vw_07_hedged_share</code>: live hedge and hedged share</summary>
+
+```sql
+DROP VIEW IF EXISTS vw_07_hedged_share;
+CREATE VIEW vw_07_hedged_share AS
+WITH asof AS (
+    SELECT MAX(as_of_date_id) AS d_id FROM vw_07_net_position
+),
+hedge_legs AS (                       -- one row per leg of each LIVE forward
+    SELECT h.entity_id, h.buy_currency AS currency_code, h.buy_amount AS signed_amount
+    FROM fact_fx_hedge h, asof
+    WHERE h.trade_date_id <= asof.d_id AND asof.d_id < h.maturity_date_id
+    UNION ALL
+    SELECT h.entity_id, h.sell_currency, -h.sell_amount
+    FROM fact_fx_hedge h, asof
+    WHERE h.trade_date_id <= asof.d_id AND asof.d_id < h.maturity_date_id
+),
+hedged AS (
+    SELECT l.entity_id, l.currency_code,
+           SUM(l.signed_amount * r.rate_to_sgd) AS hedge_sgd
+    FROM hedge_legs l
+    JOIN dim_entity  e ON e.entity_id = l.entity_id
+    JOIN asof          ON 1 = 1
+    JOIN fact_fx_rate r ON r.currency_code = l.currency_code AND r.date_id = asof.d_id
+    WHERE l.currency_code <> e.functional_currency
+    GROUP BY l.entity_id, l.currency_code
+)
+SELECT n.entity_id, n.entity_name, n.functional_currency, n.currency_code, n.as_of_date_id,
+       n.net_sgd,
+       ROUND(COALESCE(h.hedge_sgd, 0), 0)                                AS hedge_sgd,
+       ROUND(-COALESCE(h.hedge_sgd, 0) / NULLIF(n.net_sgd, 0), 4)        AS hedged_pct
+FROM vw_07_net_position n
+LEFT JOIN hedged h ON h.entity_id = n.entity_id AND h.currency_code = n.currency_code;
+```
+
+</details>
+
+↩️ [Back to Analysis 7](#analysis-7-fx_exposure)
+
+<a id="views-analysis-8"></a>
+
+### Analysis 8: Anomaly Detection
+
+<details>
+<summary><code>vw_08_alerts</code>: payments flagged by the rules, with the rules triggered</summary>
+
+```sql
+DROP VIEW IF EXISTS vw_08_alerts;
+CREATE VIEW vw_08_alerts AS
+WITH pay AS (
+    SELECT p.payment_id,
+           p.counterparty_id,
+           c.name                AS counterparty_name,
+           e.name                AS entity_name,
+           p.amount,
+           p.amount_sgd,
+           p.currency_code,
+           p.initiated_ts,
+           date(p.initiated_ts)  AS pay_date,
+           c.country             AS cpty_country,
+           k.risk_rating         AS cpty_country_risk,
+           c.first_seen_date,
+           LAG(p.initiated_ts)  OVER dup AS prev_same_ts,
+           LEAD(p.initiated_ts) OVER dup AS next_same_ts,
+           COUNT(*) OVER (PARTITION BY p.counterparty_id, date(p.initiated_ts)) AS n_day,
+           COUNT(*) OVER (PARTITION BY p.counterparty_id)                       AS n_cpty,
+           CASE e.timezone WHEN 'Asia/Singapore'   THEN 480
+                           WHEN 'Asia/Shanghai'    THEN 480
+                           WHEN 'Asia/Kolkata'     THEN 330
+                           WHEN 'Europe/Berlin'    THEN 60
+                           WHEN 'Europe/Amsterdam' THEN 60
+                           WHEN 'Europe/London'    THEN 0
+                           WHEN 'America/New_York' THEN -300 END AS tz_offset_min
+    FROM fact_payment p
+    JOIN dim_counterparty c ON c.counterparty_id = p.counterparty_id
+    JOIN dim_country      k ON k.country_code    = c.country
+    JOIN dim_account      a ON a.account_id      = p.account_id
+    JOIN dim_entity       e ON e.entity_id       = a.entity_id
+    WHERE p.direction = 'OUT'
+      AND p.is_intercompany = 0
+    WINDOW dup AS (PARTITION BY p.counterparty_id, p.amount ORDER BY p.initiated_ts)
+),
+flagged AS (
+    SELECT payment_id, counterparty_id, counterparty_name, entity_name, cpty_country, amount, amount_sgd, currency_code, initiated_ts, pay_date,
+           CASE WHEN cpty_country_risk = 'high' THEN 1 ELSE 0 END                         AS rule_high_risk,
+           CASE WHEN amount >= 10000 AND amount = CAST(amount AS INTEGER)
+                 AND CAST(amount AS INTEGER) % 1000 = 0 THEN 1 ELSE 0 END                 AS rule_round,
+           CASE WHEN amount_sgd >= 18000 AND amount_sgd < 20000 THEN 1 ELSE 0 END        AS rule_structuring,
+           CASE WHEN julianday(pay_date) - julianday(first_seen_date) <= 7
+                 AND amount_sgd >= 50000 THEN 1 ELSE 0 END                                AS rule_new_bene,
+           CASE WHEN julianday(initiated_ts) - julianday(prev_same_ts) <= 1
+                  OR julianday(next_same_ts) - julianday(initiated_ts) <= 1 THEN 1 ELSE 0 END AS rule_duplicate,
+           CASE WHEN n_day >= 10
+                 AND n_day >= 5 * n_cpty * 1.0 / (SELECT COUNT(DISTINCT pay_date) FROM pay) THEN 1 ELSE 0 END AS rule_burst,
+           CASE WHEN CAST(strftime('%H', datetime(initiated_ts, tz_offset_min || ' minutes')) AS INTEGER)
+                     NOT BETWEEN 6 AND 21 THEN 1 ELSE 0 END                               AS rule_off_hours
+    FROM pay
+)
+SELECT *,
+       rule_high_risk + rule_round + rule_structuring + rule_new_bene
+     + rule_duplicate + rule_burst + rule_off_hours AS n_rules,
+       -- readable list of the rules that fired, for tooltips and tables
+       TRIM(CASE WHEN rule_high_risk  = 1 THEN 'high-risk country, ' ELSE '' END
+         || CASE WHEN rule_round      = 1 THEN 'round amount, '      ELSE '' END
+         || CASE WHEN rule_structuring = 1 THEN 'structuring, '      ELSE '' END
+         || CASE WHEN rule_new_bene   = 1 THEN 'new beneficiary, '   ELSE '' END
+         || CASE WHEN rule_duplicate  = 1 THEN 'duplicate, '         ELSE '' END
+         || CASE WHEN rule_burst      = 1 THEN 'burst, '             ELSE '' END
+         || CASE WHEN rule_off_hours  = 1 THEN 'off-hours, '        ELSE '' END, ', ') AS rules_triggered
+FROM flagged
+WHERE rule_high_risk + rule_round + rule_structuring + rule_new_bene
+    + rule_duplicate + rule_burst + rule_off_hours > 0;
+```
+
+</details>
+
+↩️ [Back to Analysis 8](#analysis-8-anomaly_detection)
 
 ## Things to remember
 - Amounts in the `_sgd` columns can be added together across currencies and entities. Amounts in a currency's own units (for example `closing_balance`) cannot, so filter to one currency before summing them.
