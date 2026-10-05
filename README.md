@@ -150,7 +150,7 @@ We have to first think about what makes or counts as a money movement.
 1. Intercompany or internal transfers are not considered "money moving" for the group
 2. Money only moves when status is completed/delayed, not pending/returned/rejected
 
-### Query #1 - Set up the main query
+### Query 1 - Set up the main query
 ```sql
 WITH base AS (
     SELECT p.payment_id,
@@ -1072,7 +1072,7 @@ This analysis asks how much cash each entity and currency will have over the nex
 
 A forecast needs history to learn from, so the queries below prepare it: daily balances, daily net cash flow, a check that the two agree, then a weekly series and the day-of-week pattern. The forecast model itself is not built yet.
 ### Query 1 - Daily closing balances per entity and currency
-fact_balance is one row per account per day. We limit it to 30 to not bloat the table.
+fact_balance is one row per account per day. We limit it to 14 (2 weeks for E01) to not bloat the table.
 ```SQL
 SELECT b.date_id,
        a.entity_id,
@@ -2358,12 +2358,20 @@ WHERE cpty_country_risk = 'high'
 ```
 
 </details>
-Example for RULE 2, WHERE amount >= 10000...
-```
-n_alerts|alerts_per_day|
---------+--------------+
-     335|           0.5|
-```
+
+To run a rule, keep that rule's `WHERE` line and comment out the others (above, rule 1 is switched on). Running each rule in turn gives:
+
+| Rule | n_alerts | alerts_per_day |
+|---|---:|---:|
+| 1 High-risk country | 2,627 | 3.9 |
+| 2 Round amount (>= 10,000, multiple of 1,000) | 335 | 0.5 |
+| 3 Structuring (18,000 to under 20,000 SGD) | 1,424 | 2.1 |
+| 4 New beneficiary paid a lot | 405 | 0.6 |
+| 5 Duplicate | 820 | 1.2 |
+| 6 Burst | 1,057 | 1.6 |
+| 7 Off-hours | 513 | 0.8 |
+
+`alerts_per_day` divides by the 673 days that have outgoing external payments (68,692 payments in all). The rules overlap, so these counts cannot simply be added up. High-risk country raises the most alerts, which is a warning sign: an analyst would have to review about 4 of them every day, and Analysis 8 Query 4 shows most of them are false alarms.
 
 ### Query 3 - Risk score per payment
 Building off of query 2, we are able to score each rule that we built and give a score of 0/1 for each rule. We can then order by the total risk score DESC to find the payments with the highest risk.
@@ -2431,31 +2439,24 @@ ORDER BY n_rules DESC;
 ```
 
 </details>
-<details>
-<summary>Query 3: show the output (16 rows)</summary>
 
-```
-payment_id|pay_date  |rule_high_risk|rule_round|rule_structuring|rule_new_bene|rule_duplicate|rule_burst|rule_off_hours|n_rules|
-----------+----------+--------------+----------+----------------+-------------+--------------+----------+--------------+-------+
-P00095397 |2026-06-18|             1|         0|               0|            0|             0|         1|             1|      3|
-P00095153 |2026-06-18|             1|         0|               0|            0|             0|         1|             1|      3|
-P00095478 |2026-06-18|             1|         0|               0|            0|             1|         1|             0|      3|
-P00095480 |2026-06-18|             1|         0|               0|            0|             1|         1|             0|      3|
-P00026248 |2025-02-13|             1|         0|               1|            0|             0|         1|             0|      3|
-P00095245 |2026-06-18|             1|         0|               1|            0|             0|         1|             0|      3|
-P00064921 |2025-11-18|             1|         0|               1|            0|             1|         0|             0|      3|
-P00064926 |2025-11-18|             1|         0|               1|            0|             1|         0|             0|      3|
-P00071051 |2025-12-30|             1|         0|               1|            0|             0|         1|             0|      3|
-P00096228 |2026-06-25|             1|         1|               0|            0|             0|         1|             0|      3|
-P00070902 |2025-12-30|             1|         1|               0|            0|             0|         1|             0|      3|
-P00045302 |2025-07-03|             0|         1|               0|            0|             1|         0|             0|      2|
-P00045415 |2025-07-03|             0|         1|               0|            0|             1|         0|             0|      2|
-P00029112 |2025-03-06|             0|         0|               1|            0|             0|         1|             0|      2|
-P00098359 |2026-07-09|             0|         0|               1|            0|             0|         1|             0|      2|
-P00009260 |2024-10-07|             0|         0|               0|            1|             0|         0|             1|      2|
-```
+The top of the list is the 11 payments that trip 3 rules (`1` = the rule fired, `0` = it did not):
 
-</details>
+| payment_id | pay_date | rule_high_risk | rule_round | rule_structuring | rule_new_bene | rule_duplicate | rule_burst | rule_off_hours | n_rules |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| P00095397 | 2026-06-18 | 1 | 0 | 0 | 0 | 0 | 1 | 1 | 3 |
+| P00095153 | 2026-06-18 | 1 | 0 | 0 | 0 | 0 | 1 | 1 | 3 |
+| P00095478 | 2026-06-18 | 1 | 0 | 0 | 0 | 1 | 1 | 0 | 3 |
+| P00095480 | 2026-06-18 | 1 | 0 | 0 | 0 | 1 | 1 | 0 | 3 |
+| P00026248 | 2025-02-13 | 1 | 0 | 1 | 0 | 0 | 1 | 0 | 3 |
+| P00095245 | 2026-06-18 | 1 | 0 | 1 | 0 | 0 | 1 | 0 | 3 |
+| P00064921 | 2025-11-18 | 1 | 0 | 1 | 0 | 1 | 0 | 0 | 3 |
+| P00064926 | 2025-11-18 | 1 | 0 | 1 | 0 | 1 | 0 | 0 | 3 |
+| P00071051 | 2025-12-30 | 1 | 0 | 1 | 0 | 0 | 1 | 0 | 3 |
+| P00096228 | 2026-06-25 | 1 | 1 | 0 | 0 | 0 | 1 | 0 | 3 |
+| P00070902 | 2025-12-30 | 1 | 1 | 0 | 0 | 0 | 1 | 0 | 3 |
+
+Across all 6,893 flagged payments, 6,616 trip one rule, 266 trip two and 11 trip three, so most alerts rest on a single signal.
 
 These payments have a high risk score based on our analysis, and should be investigated for AML and fraudulent controls.
 
