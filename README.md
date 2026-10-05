@@ -2830,6 +2830,56 @@ What this tells us:
 - **Off-hours** and **burst** miss many planted cases (recall 0.47 and 0.72); the local-time and burst thresholds are the knobs to tune.
 - Payments that trip 2 or 3 rules are only slightly more likely to be real, so a simple rule count is a weak risk score. Weighting rules by their precision would work better.
 - The Isolation Forest is worse than the rules here (precision 0.21 vs 0.35). The planted anomalies are rule-shaped, so rules suit this dataset. In real data, where no one knows the patterns in advance, a model is useful alongside rules.
+
+
+# Step 3: Preparing the data for Tableau
+The SQL analyses are done, so the next job is to get their results in front of a reader as dashboards. I use Tableau Public which is free, runs on a Mac and lets me publish a link for the portfolio. Tableau Public cannot connect to a SQLite database, so this step turns each analysis into a CSV file that Tableau can read. I also used Power BI for my previous project, so I wanted to use Tableau for this one.
+
+## How it works
+```
+sql/analyses/*.sql  --(run)-->  views inside treasury.sqlite  --(export)-->  dashboards/data/*.csv  --(load)-->  Tableau
+ the queries I wrote           saved queries, one per chart        one finished table per chart              one sheet per CSV
+```
+- A **view** is a saved query. It stores the SQL (not the numbers) so it always reads the latest data in the database. Every chart in the dashboard has one view that returns the exact rows and columns it needs (named `vw_<analysis number>_<what it shows>`).
+- The views are written in the SQL files, so the SQL files stay the single source of truth. Two small Python programs in `src/treasury/analytics/` move them around, because plain SQLite has no "run all my views" button:
+  - `views.py` runs every `CREATE VIEW` statement in `sql/analyses/*.sql` inside the clean database. It also drops views that I have since deleted from the SQL files.
+  - `export_views.py` reads each view and writes it to `dashboards/data/<view name>.csv`. Any `date_id` column (a number like 20241001) also gets a real `date` column, because Tableau needs a proper date to draw a time axis.
+- Anomaly **scoring** is the one piece that is not a view. It compares my alerts with the answer key, which must never go into the clean database. So `score_alerts.py` writes its result straight to `dashboards/data/08_rule_scores.csv`.
+
+## Steps
+1. **Build the data (only if `data_small/` does not exist yet).** `.venv/bin/treasury-sim backfill --config config/simulation.small.yaml` takes about 20 seconds. Skip this if the data is already there.
+2. **Create the views in the database.** From the project folder, run
+   `TREASURY_CONFIG=config/simulation.small.yaml .venv/bin/python -m treasury.analytics.views`.
+   It prints the 24 views it created. They live inside `data_small/clean/treasury.sqlite`, which is not committed to git, so on a fresh build you must run this step again.
+3. **Export the views to CSV.** Run
+   `TREASURY_CONFIG=config/simulation.small.yaml .venv/bin/python -m treasury.analytics.export_views`.
+   It writes one CSV per view to `dashboards/data/` and prints the row count of each. Old CSVs of deleted views are removed first, so the folder only holds current files.
+4. **Score the anomaly rules.** Run
+   `TREASURY_CONFIG=config/simulation.small.yaml .venv/bin/python -m treasury.analytics.score_alerts`.
+   It prints the precision and recall of each rule and writes `dashboards/data/08_rule_scores.csv`. This needs step 2 first, because it reads `vw_08_alerts`.
+5. **Check the files.** Open one or two CSVs and compare them with the README. For example `vw_01_currency.csv` should have a USD row with about 1,028M SGD, and `vw_05_daily_balance.csv` should have a `date` column.
+6. **Commit the CSVs.** They are small (about 3 MB), contain only synthetic data and are what Tableau reads, so they are committed to git.
+7. **Load them into Tableau Public**
+
+Run steps 2 to 4 again whenever I edit a view in the SQL files or rebuild the data. A rebuild drops all the views, so step 2 always comes first.
+
+## Which CSV feeds which dashboard
+| Dashboard | CSVs | Main charts |
+|---|---|---|
+| 1 Money movement | `vw_01_currency`, `vw_01_corridor`, `vw_01_entity`, `vw_01_monthly` | value by currency, top corridors, inflow vs outflow per entity, monthly trend |
+| 2 Cross-border | `vw_02_corridor_scorecard` | speed vs failure rate per corridor |
+| 3 Payment efficiency | `vw_03_channel_efficiency`, `vw_03_rail_timing`, `vw_03_stage_durations` | straight-through rate by channel, settlement time by rail, where the time goes |
+| 4 Failures | `vw_04_failure_pareto`, `vw_04_repeat_offenders`, `vw_04_risk_rating`, `vw_04_failure_rail`, `vw_04_failure_trend` | Pareto of reasons, repeat offenders, failure rate by risk, rail and month |
+| 5 Liquidity | `vw_05_daily_balance`, `vw_05_daily_net_flow`, `vw_05_weekly_net_flow`, `vw_05_weekday_pattern` | balance over time, net flow, weekday rhythm (history only, no forecast yet) |
+| 6 Cash concentration | `vw_06_account_position`, `vw_06_daily_idle_vs_overdrawn`, `vw_06_pooling_benefit` | idle vs overdrawn cash, pooling saving per scenario |
+| 7 FX exposure | `vw_07_net_position`, `vw_07_sensitivity`, `vw_07_hedged_share` | long/short position, loss from a 5% and 10% move, hedged share |
+| 8 Anomalies | `vw_08_alerts`, `08_rule_scores` | alerts per rule, precision and recall per rule, the alert list |
+
+## Things to remember
+- Amounts in the `_sgd` columns can be added together across currencies and entities. Amounts in a currency's own units (for example `closing_balance`) cannot, so filter to one currency before summing them.
+- The CSVs come from the small profile (about 106,000 payments). The numbers on the dashboard will match the small-profile numbers in this README.
+- A view only exports what is in the database at that moment. If the data changes, run steps 2 to 4 again before reloading Tableau (Data > Refresh).
+
 ## Layout
 
 | Path | Part | What |
@@ -2869,7 +2919,8 @@ guarantees each analysis has something to find.
 - [x] Explored the raw data in a notebook and found all 6 defects
 - [x] Part 1b cleaning pipeline: skipped on purpose, the analyses use the clean database
 - [x] Part 2 SQL analyses (1-8 done, views in `sql/analyses/`, applied with `python -m treasury.analytics.views`)
-- [ ] Part 3 dashboards · Part 4 API
+- [x] Part 3a: views exported to CSV for Tableau (`dashboards/data/`)
+- [ ] Part 3b: Tableau dashboards · Part 4 API
 
 ## What's in the data
 
